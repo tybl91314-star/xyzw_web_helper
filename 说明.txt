@@ -1,0 +1,2 @@
+安装好node.js后，在cmd中安装pnpm：     npm install -g pnpm
+启动：pnpm run dev
