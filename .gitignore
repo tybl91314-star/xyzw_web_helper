@@ -71,6 +71,7 @@ jspm_packages/
 # Temporary folders
 tmp/
 temp/
+.tmp-chrome-*/
 
 .github
 *.bat
