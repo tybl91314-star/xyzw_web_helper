@@ -10,9 +10,6 @@
       'club-mode': activeSection === 'club',
     }"
   >
-    <!-- 身份牌常驻（嵌入式，Tabs 上方） -->
-    <IdentityCard embedded />
-
     <!-- 下方选卡分区切换（Tabs）：日常｜俱乐部｜活动 -->
     <n-tabs
       class="section-tabs"
@@ -200,7 +197,10 @@
         <ClubBattleRecords />
       </div>
 
-      <div class="warrank-full-container" v-if="saltFieldSubTab === 'warrank'">
+      <div
+        class="warrank-full-container salt-warrank-container"
+        v-if="saltFieldSubTab === 'warrank'"
+      >
         <ClubWarrank />
       </div>
 
@@ -306,6 +306,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from "vue";
+import { useRoute } from "vue-router";
 import { useTokenStore } from "@/stores/tokenStore";
 import { useMessage } from "naive-ui";
 import {
@@ -346,6 +347,7 @@ import Unlimitedlineup from "./cards/Unlimitedlineup.vue";
 
 const tokenStore = useTokenStore();
 const message = useMessage();
+const route = useRoute();
 
 const legionMatch = ref({
   isRegistered: false,
@@ -353,10 +355,29 @@ const legionMatch = ref({
 
 // 响应式数据
 const showIdentity = ref(false);
-const activeSection = ref("daily");
+const gameSections = new Set([
+  "daily",
+  "club",
+  "activity",
+  "tools",
+  "saltFieldGroup",
+  "peachGroup",
+  "rankGroup",
+  "fightPvp",
+]);
+const normalizeSection = (section) =>
+  gameSections.has(String(section)) ? String(section) : "daily";
+const activeSection = ref(normalizeSection(route.query.section));
 const saltFieldSubTab = ref("warrank");
 const peachSubTab = ref("peach");
 const rankSubTab = ref("serverrank");
+
+watch(
+  () => route.query.section,
+  (section) => {
+    activeSection.value = normalizeSection(section);
+  },
+);
 
 // 活动开放时间：仅周一到周三可参与
 const isActivityOpen = computed(() => {
@@ -800,6 +821,12 @@ onUnmounted(() => {
   }
 }
 
+.salt-warrank-container {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+}
+
 .salt-field-group,
 .peach-group,
 .rank-group {
@@ -936,8 +963,39 @@ onUnmounted(() => {
 // 响应式设计
 @media (max-width: 768px) {
   .game-status-container {
-    grid-template-columns: 1fr;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr);
     padding: var(--spacing-sm);
+    overflow-x: hidden;
+  }
+
+  .game-status-container > *,
+  .salt-field-group,
+  .peach-group,
+  .rank-group,
+  .warrank-full-container {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .section-tabs {
+    display: none;
+  }
+
+  .sub-nav {
+    max-width: 100%;
+    justify-content: flex-start !important;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  :deep(.status-card),
+  :deep(.n-card) {
+    min-width: 0;
+    max-width: 100%;
   }
 
   .status-card {

@@ -1,71 +1,62 @@
 <template>
   <n-card class="club-car-king" embedded :bordered="false">
-    <n-thing>
-      <template #avatar>
+    <div class="car-overview">
+      <div class="car-toolbar">
         <n-avatar
-          :size="48"
+          :size="64"
           src="/icons/疯狂赛车.png"
           color="transparent"
-          style="background-color: transparent;"
+          class="car-overview-icon"
         />
-      </template>
-      <template #header>
-        <span style="font-size: 18px; font-weight: bold;">疯狂赛车</span>
-      </template>
-      <template #description>
-        <n-space size="small" style="margin-top: 4px;">
-          <n-tag size="small" :bordered="false" type="info">
-            {{ carList.length > 0 ? `共 ${carList.length} 辆` : "暂无数据" }}
-          </n-tag>
-          <n-tag size="small" :bordered="false" :type="hasFreeRefresh ? 'success' : 'default'">
-            {{ hasFreeRefresh ? `有 ${freeCarsCount} 辆可免费刷新` : "无免费刷新" }}
-          </n-tag>
-          <n-tag size="small" :bordered="false" type="warning">
-            <template #icon>
-              <n-icon><Ticket /></n-icon>
-            </template>
-            剩余车票: {{ refreshTickets }}
-          </n-tag>
-        </n-space>
-      </template>
-      <template #header-extra>
-        <n-space size="small">
+        <div class="car-toolbar-actions">
           <n-button
             type="primary"
             size="small"
+            block
             :loading="carLoading"
             @click="fetchCarInfo"
           >
-            <template #icon>
-              <n-icon><Refresh /></n-icon>
-            </template>
+            <template #icon><n-icon><Refresh /></n-icon></template>
             {{ carLoading ? "加载中..." : "刷新数据" }}
           </n-button>
-          <n-button
-            size="small"
-            secondary
-            :disabled="carLoading || !isConnected"
-            @click="smartSendCar"
-          >
-            <template #icon>
-              <n-icon><Flash /></n-icon>
-            </template>
-            智能发车
-          </n-button>
-          <n-button
-            size="small"
-            secondary
-            :disabled="carLoading || !isConnected"
-            @click="claimAllCars"
-          >
-            <template #icon>
-              <n-icon><ArrowUpCircle /></n-icon>
-            </template>
-            一键收车
-          </n-button>
-        </n-space>
-      </template>
-    </n-thing>
+          <div class="car-secondary-actions">
+            <n-button
+              size="small"
+              secondary
+              block
+              :disabled="carLoading || !isConnected"
+              @click="smartSendCar"
+            >
+              <template #icon><n-icon><Flash /></n-icon></template>
+              智能发车
+            </n-button>
+            <n-button
+              size="small"
+              secondary
+              block
+              :disabled="carLoading || !isConnected"
+              @click="claimAllCars"
+            >
+              <template #icon><n-icon><ArrowUpCircle /></n-icon></template>
+              一键收车
+            </n-button>
+          </div>
+        </div>
+      </div>
+
+      <div class="car-summary">
+        <n-tag size="small" :bordered="false" type="info">
+          {{ carList.length > 0 ? `共 ${carList.length} 辆` : "暂无数据" }}
+        </n-tag>
+        <n-tag size="small" :bordered="false" :type="hasFreeRefresh ? 'success' : 'default'">
+          {{ hasFreeRefresh ? `有 ${freeCarsCount} 辆可免费刷新` : "无免费刷新" }}
+        </n-tag>
+        <n-tag size="small" :bordered="false" type="warning">
+          <template #icon><n-icon><Ticket /></n-icon></template>
+          剩余车票: {{ refreshTickets }}
+        </n-tag>
+      </div>
+    </div>
 
     <div class="card-content" style="margin-top: 16px;">
       <div v-if="!isConnected" class="hint">
@@ -130,9 +121,8 @@
               </n-space>
             </div>
 
-            <div class="car-actions" style="margin-top: 16px;">
-              <n-grid cols="3" x-gap="8">
-                <n-gi>
+            <div class="car-actions car-actions-grid" style="margin-top: 16px;">
+                <div class="refresh-grade-action">
                   <n-button
                     size="tiny"
                     block
@@ -142,10 +132,10 @@
                     @click="refreshCar(c)"
                   >
                     <template #icon><n-icon><Refresh /></n-icon></template>
-                    {{ Number(c.refreshCount ?? 0) === 0 ? "免费刷新" : "刷新品阶(需车票)" }}
+                    {{ Number(c.refreshCount ?? 0) === 0 ? "免费刷新" : "刷新品阶（需车票）" }}
                   </n-button>
-                </n-gi>
-                <n-gi>
+                </div>
+                <div>
                   <n-button
                     size="tiny"
                     block
@@ -156,8 +146,8 @@
                     <template #icon><n-icon><CarSport /></n-icon></template>
                     {{ actionLabel(c) === '发车' ? '发车' : '收车' }}
                   </n-button>
-                </n-gi>
-                <n-gi>
+                </div>
+                <div>
                   <n-button
                     size="tiny"
                     block
@@ -168,8 +158,7 @@
                     <template #icon><n-icon><Person /></n-icon></template>
                     护卫
                   </n-button>
-                </n-gi>
-              </n-grid>
+                </div>
             </div>
           </n-card>
         </n-gi>
@@ -210,7 +199,7 @@
 
 <script setup>
 import { ref, computed, watch, onMounted, onUnmounted } from "vue";
-import { useMessage, NCard, NThing, NAvatar, NSpace, NButton, NTag, NGrid, NGi, NIcon, NModal, NSelect, NSpin, NEmpty, NStatistic } from "naive-ui";
+import { useMessage, NCard, NAvatar, NSpace, NButton, NTag, NGrid, NGi, NIcon, NModal, NSelect, NEmpty } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
 import { CarSport, Refresh, Flash, ArrowUpCircle, Person, Ticket } from "@vicons/ionicons5";
 
@@ -1122,6 +1111,71 @@ const cancelHelper = () => {
 .club-car-king {
   .hint {
     margin-bottom: 16px;
+  }
+}
+
+.car-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.car-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.car-overview-icon {
+  flex: 0 0 auto;
+}
+
+.car-toolbar-actions {
+  width: min(360px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.car-secondary-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.car-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.car-actions-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .car-toolbar {
+    align-items: flex-start;
+  }
+
+  .car-toolbar-actions {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .car-summary {
+    width: 100%;
+  }
+
+  .car-actions-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    .refresh-grade-action {
+      grid-column: 1 / -1;
+    }
   }
 }
 

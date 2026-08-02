@@ -5,13 +5,48 @@
       <n-input v-model:value="importForm.name" placeholder="例如：主号战士" clearable />
     </n-form-item>
 
-    <n-form-item :label="'bin文件'" :show-label="true">
-      <a-upload multiple accept="*.bin,*.dmp" @before-upload="uploadBin" draggable dropzone placeholder="粘贴Token字符串..."
-        clearable>
-        <!-- <div class="dropzone-content">
-          请点击上传或将bind文件拖拽到此处
-        </div> -->
-      </a-upload>
+    <n-form-item :label="'BIN文件'" :show-label="true">
+      <div class="bin-picker">
+        <input
+          ref="fileInputRef"
+          class="native-file-input"
+          type="file"
+          accept=".bin,.dmp"
+          multiple
+          @change="handleFileSelection"
+        />
+        <input
+          ref="folderInputRef"
+          class="native-file-input"
+          type="file"
+          accept=".bin,.dmp"
+          multiple
+          webkitdirectory
+          directory
+          @change="handleFileSelection"
+        />
+
+        <div class="picker-actions">
+          <n-button
+            type="primary"
+            size="large"
+            :loading="isReadingFiles"
+            @click="fileInputRef?.click()"
+          >
+            选择BIN文件
+          </n-button>
+          <n-button
+            size="large"
+            :disabled="isReadingFiles"
+            @click="chooseBinFolder"
+          >
+            选择文件夹
+          </n-button>
+        </div>
+        <div class="picker-tip">
+          可一次选择多个BIN文件；选择文件夹时会自动读取其全部子文件夹中的BIN文件。
+        </div>
+      </div>
     </n-form-item>
     <a-list>
       <a-list-item v-for="(role, index) in roleList" :key="index">
@@ -58,6 +93,7 @@
 
 <script lang="ts" setup>
 import { ref, reactive } from "vue";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { useTokenStore } from "@/stores/tokenStore";
 import { CloudUpload } from "@vicons/ionicons5";
 
@@ -75,6 +111,7 @@ import {
 import PQueue from "p-queue";
 import useIndexedDB from "@/hooks/useIndexedDB";
 import { getTokenId, transformToken } from "@/utils/token";
+import { getNearestParentFolderName } from "@/utils/tokenFolderGroup.js";
 
 const $emit = defineEmits(["cancel", "ok"]);
 
@@ -88,6 +125,14 @@ const cancel = () => {
 const tokenStore = useTokenStore();
 const message = useMessage();
 const isImporting = ref(false);
+const isReadingFiles = ref(false);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const folderInputRef = ref<HTMLInputElement | null>(null);
+const BinFolderPicker = registerPlugin<{
+  pickBinFolder: () => Promise<{
+    files: Array<{ name: string; relativePath: string; data: string }>;
+  }>;
+}>("BinFolderPicker");
 const importForm = reactive({
   name: "",
   server: "",
@@ -102,8 +147,11 @@ const roleList = ref<
     server: string;
     wsUrl: string;
     importMethod: string;
+    groupName?: string;
   }>
 >([]);
+
+const fileGroupNames = new WeakMap<File, string>();
 
 const tQueue = new PQueue({ concurrency: 1, interval: 1000 });
 
@@ -129,13 +177,10 @@ const initName = (fileName: string) => {
   };
 };
 
-const uploadBin = (binFile: File) => {
-  tQueue.add(async () => {
+const processBinFile = async (binFile: File) => {
     console.log("上传文件数据:", binFile);
     const roleMeta = initName(binFile.name) as any;
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const userToken = e.target?.result as ArrayBuffer;
+    const userToken = await binFile.arrayBuffer();
       // console.log('转换Token:', userToken);
       const tokenId = getTokenId(userToken);
       const roleToken = await transformToken(userToken);
@@ -143,14 +188,12 @@ const uploadBin = (binFile: File) => {
       // 刷新indexDB数据库token数据
       const saved = await storeArrayBuffer(tokenId, userToken);
       if (!saved) {
-        message.error("保存BIN数据到IndexedDB失败");
-        return;
+        throw new Error("保存BIN数据到IndexedDB失败");
       }
       
       // 上传列表中发现已存在的重复名称，提示消息
       if (roleList.value.some((role) => role.id === tokenId)) {
-        message.error("上传列表中已存在同名角色! ");
-        return;
+        return false;
       }
       // 检查待上传的角色是否已在tokenStore中存在
       const existingToken = tokenStore.gameTokens.find(
@@ -159,7 +202,6 @@ const uploadBin = (binFile: File) => {
       if (existingToken) {
         message.warning(`角色"${roleName}"已存在，将更新该角色的Token`);
       }
-      message.success("Token读取成功，请检查角色名称等信息后提交");
       roleList.value.push({
         id: tokenId,
         token: roleToken,
@@ -167,14 +209,96 @@ const uploadBin = (binFile: File) => {
         server: roleMeta.server + "" + roleMeta.roleIndex || "",
         wsUrl: importForm.wsUrl || "",
         importMethod: "bin",
+        groupName: fileGroupNames.get(binFile) || "",
       });
-    };
-    reader.onerror = () => {
-      message.error("读取文件失败，请重试");
-    };
-    reader.readAsArrayBuffer(binFile);
+      return true;
+};
+
+const processSelectedFiles = async (selectedFiles: File[]) => {
+  const binFiles = selectedFiles.filter((file) =>
+    /\.(bin|dmp)$/i.test(file.name),
+  );
+  if (binFiles.length === 0) {
+    message.warning("没有找到BIN文件");
+    return;
+  }
+
+  isReadingFiles.value = true;
+  let importedCount = 0;
+  let skippedCount = 0;
+  let failedCount = 0;
+
+  try {
+    for (const file of binFiles) {
+      try {
+        const imported = await tQueue.add(() => processBinFile(file));
+        imported ? importedCount++ : skippedCount++;
+      } catch (error) {
+        failedCount++;
+        console.error(`读取BIN文件失败: ${file.name}`, error);
+      }
+    }
+
+    if (importedCount > 0) {
+      message.success(`成功读取 ${importedCount} 个BIN文件，请确认后添加Token`);
+    }
+    if (skippedCount > 0) {
+      message.warning(`已跳过 ${skippedCount} 个重复角色`);
+    }
+    if (failedCount > 0) {
+      message.error(`${failedCount} 个BIN文件读取失败`);
+    }
+  } finally {
+    isReadingFiles.value = false;
+  }
+};
+
+const handleFileSelection = async (event: Event) => {
+  const input = event.target as HTMLInputElement;
+  const selectedFiles = Array.from(input.files || []);
+  input.value = "";
+  selectedFiles.forEach((file) => {
+    const groupName = getNearestParentFolderName(file.webkitRelativePath || "");
+    if (groupName) fileGroupNames.set(file, groupName);
   });
-  return false; // 阻止自动上传
+  await processSelectedFiles(selectedFiles);
+};
+
+const decodeBase64File = (name: string, base64Data: string) => {
+  const binary = atob(base64Data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], name, { type: "application/octet-stream" });
+};
+
+const chooseBinFolder = async () => {
+  if (Capacitor.getPlatform() !== "android") {
+    folderInputRef.value?.click();
+    return;
+  }
+
+  isReadingFiles.value = true;
+  try {
+    const result = await BinFolderPicker.pickBinFolder();
+    const files = (result.files || []).map((entry) => {
+      const file = decodeBase64File(entry.name, entry.data);
+      const groupName = getNearestParentFolderName(entry.relativePath || "");
+      if (groupName) fileGroupNames.set(file, groupName);
+      return file;
+    });
+    if (files.length === 0) {
+      message.warning("所选文件夹及其子文件夹中没有BIN文件");
+      return;
+    }
+    await processSelectedFiles(files);
+  } catch (error: any) {
+    console.error("选择BIN文件夹失败", error);
+    message.error(error?.message || "选择文件夹失败");
+  } finally {
+    isReadingFiles.value = false;
+  }
 };
 
 const handleImport = async () => {
@@ -195,6 +319,21 @@ const handleImport = async () => {
       tokenStore.addToken({
         ...role,
       });
+    }
+
+    if (role.groupName) {
+      const normalizedName = role.groupName.trim();
+      let group = tokenStore.tokenGroups.find(
+        (item) => item.name.trim().toLowerCase() === normalizedName.toLowerCase(),
+      );
+      if (!group) {
+        const colors = ["#1677ff", "#52c41a", "#faad14", "#722ed1", "#13c2c2"];
+        group = tokenStore.createTokenGroup(
+          normalizedName,
+          colors[tokenStore.tokenGroups.length % colors.length],
+        );
+      }
+      tokenStore.addTokenToGroup(group.id, role.id);
     }
   });
   console.log("当前Token列表:", tokenStore.gameTokens);
@@ -221,6 +360,37 @@ const handleImport = async () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.bin-picker {
+  width: 100%;
+  padding: 16px;
+  border: 1px dashed var(--border-color, #d9d9d9);
+  border-radius: 8px;
+  background: var(--bg-tertiary, #fafafa);
+}
+
+.native-file-input {
+  display: none;
+}
+
+.picker-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.picker-tip {
+  margin-top: 10px;
+  color: var(--text-secondary, #666);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+@media (max-width: 480px) {
+  .picker-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .dropzone-content {

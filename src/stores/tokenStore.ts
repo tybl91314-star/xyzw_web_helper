@@ -62,6 +62,7 @@ declare interface TokenGroup {
   id: string;
   name: string;
   color: string; // 分组颜色，用于UI显示
+  sortOrder?: number; // 显示顺序，从1开始，数字越小越靠前
   tokenIds: string[]; // 属于该分组的token ID列表
   createdAt?: string;
   updatedAt?: string;
@@ -1461,11 +1462,16 @@ export const useTokenStore = defineStore("tokens", () => {
   /**
    * 创建新的分组
    */
-  const createTokenGroup = (name: string, color: string = "#1677ff") => {
+  const createTokenGroup = (
+    name: string,
+    color: string = "#1677ff",
+    sortOrder: number = tokenGroups.value.length + 1,
+  ) => {
     const group: TokenGroup = {
       id: "group_" + Date.now() + Math.random().toString(36).slice(2),
       name,
       color,
+      sortOrder: Math.max(1, Math.trunc(Number(sortOrder) || 1)),
       tokenIds: [],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -1580,6 +1586,7 @@ export const useTokenStore = defineStore("tokens", () => {
     // WebSocket方法
     createWebSocketConnection,
     closeWebSocketConnection,
+    closeWebSocketConnectionAsync,
     getWebSocketStatus,
     getWebSocketClient,
     sendMessage,

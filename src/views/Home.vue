@@ -9,14 +9,6 @@
             <span class="brand-text">XYZW 游戏管理系统</span>
           </div>
 
-          <div class="mobile-menu-button">
-            <n-button text @click="isMobileMenuOpen = true">
-              <n-icon>
-                <Menu />
-              </n-icon>
-            </n-button>
-          </div>
-
           <div class="nav-actions">
             <template v-if="!authStore.isAuthenticated">
               <n-button
@@ -48,85 +40,6 @@
         </div>
       </div>
     </nav>
-
-    <n-drawer
-      v-model:show="isMobileMenuOpen"
-      placement="left"
-      style="width: 260px"
-    >
-      <div class="drawer-menu">
-        <router-link
-          to="/"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Ribbon />
-          </n-icon>
-          <span>首页</span>
-        </router-link>
-        <router-link
-          to="/admin/dashboard"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Settings />
-          </n-icon>
-          <span>控制台</span>
-        </router-link>
-        <router-link
-          to="/admin/game-features"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Cube />
-          </n-icon>
-          <span>游戏功能</span>
-        </router-link>
-        <router-link
-          to="/tokens"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <PersonCircle />
-          </n-icon>
-          <span>Token管理</span>
-        </router-link>
-        <router-link
-          to="/changelog"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Ribbon />
-          </n-icon>
-          <span>更新日志</span>
-        </router-link>
-        <div class="drawer-actions">
-          <n-button
-            type="primary"
-            block
-            @click="
-              router.push('/login');
-              isMobileMenuOpen = false;
-            "
-            >登录</n-button
-          >
-          <n-button
-            type="primary"
-            block
-            @click="
-              router.push('/register');
-              isMobileMenuOpen = false;
-            "
-            >注册</n-button
-          >
-        </div>
-      </div>
-    </n-drawer>
 
     <!-- 主要内容 -->
     <main class="main-content">
@@ -260,12 +173,11 @@
 import { ref, onMounted, markRaw } from "vue";
 import { useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
-import { PersonCircle, Cube, Ribbon, Settings, Menu } from "@vicons/ionicons5";
+import { PersonCircle, Cube, Ribbon, Settings } from "@vicons/ionicons5";
 
 const router = useRouter();
 const authStore = useAuthStore();
 const featuresSection = ref(null);
-const isMobileMenuOpen = ref(false);
 
 // 功能卡片数据
 const featureCards = ref([
@@ -346,36 +258,6 @@ onMounted(() => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   position: relative;
   overflow-x: hidden;
-  padding-bottom: calc(var(--spacing-md) + env(safe-area-inset-bottom));
-}
-
-.drawer-menu {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-md);
-}
-
-.drawer-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--border-radius-medium);
-  color: var(--text-secondary);
-  text-decoration: none;
-}
-
-.drawer-item.router-link-active {
-  background: var(--primary-color-light);
-  color: var(--primary-color);
-}
-
-.drawer-actions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  margin-top: var(--spacing-md);
 }
 
 // 导航栏
@@ -385,7 +267,8 @@ onMounted(() => {
   left: 0;
   right: 0;
   z-index: var(--z-fixed);
-  padding: var(--spacing-md) 0;
+  padding: calc(var(--spacing-md) + env(safe-area-inset-top)) 0
+    var(--spacing-md);
   backdrop-filter: blur(10px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
@@ -394,10 +277,6 @@ onMounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.mobile-menu-button {
-  display: none;
 }
 
 .nav-brand {
@@ -441,10 +320,12 @@ onMounted(() => {
   grid-template-columns: 1fr 1fr;
   gap: var(--spacing-2xl);
   align-items: center;
+  min-width: 0;
 }
 
 .hero-text {
   color: white;
+  min-width: 0;
 }
 
 .hero-title {
@@ -460,6 +341,7 @@ onMounted(() => {
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  overflow-wrap: anywhere;
 }
 
 .hero-subtitle {
@@ -681,11 +563,18 @@ onMounted(() => {
   .hero-content {
     grid-template-columns: 1fr;
     text-align: center;
+    width: 100%;
+    gap: var(--spacing-lg);
   }
 
-  .mobile-menu-button {
-    display: inline-flex;
-    margin-left: auto;
+  .hero-text,
+  .hero-visual {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .feature-cards {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .nav-actions {
@@ -693,7 +582,11 @@ onMounted(() => {
   }
 
   .hero-title {
-    font-size: 2.5rem;
+    font-size: clamp(2rem, 10vw, 2.5rem);
+  }
+
+  .hero-subtitle {
+    font-size: var(--font-size-lg);
   }
 
   .hero-actions {

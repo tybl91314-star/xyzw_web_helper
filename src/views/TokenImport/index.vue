@@ -40,17 +40,19 @@
         </template>
         <div class="card-header">
           <!-- 导入方式选择 -->
-          <n-radio-group
-            v-model:value="importMethod"
-            class="import-method-tabs"
-            size="small"
-          >
-            <n-radio-button value="manual"> 手动输入 </n-radio-button>
-            <n-radio-button value="url"> URL获取 </n-radio-button>
-            <n-radio-button value="wxQrcode"> 微信扫码获取 </n-radio-button>
-            <n-radio-button value="bin"> BIN多角色获取 </n-radio-button>
-            <n-radio-button value="singlebin"> BIN单角色获取 </n-radio-button>
-          </n-radio-group>
+          <div class="import-method-tabs">
+            <n-button
+              v-for="method in importMethods"
+              :key="method.value"
+              class="import-method-button"
+              size="small"
+              :type="importMethod === method.value ? 'primary' : 'default'"
+              :secondary="importMethod === method.value"
+              @click="importMethod = method.value"
+            >
+              {{ method.label }}
+            </n-button>
+          </div>
         </div>
         <div class="card-body">
           <manual-token-form
@@ -84,74 +86,88 @@
       <!-- Token列表 -->
       <div v-if="tokenStore.hasTokens" class="tokens-section">
         <div class="section-header">
-          <n-space align="center">
-            <h2>我的Token列表 ({{ tokenStore.gameTokens.length }}个)</h2>
-            <n-radio-group v-model:value="viewMode" size="small">
-              <n-radio-button value="list">列表</n-radio-button>
-              <n-radio-button value="card">卡片</n-radio-button>
-            </n-radio-group>
-            <n-divider vertical style="height: 24px"></n-divider>
-            <n-button-group size="small">
-              <n-button
-                @click="toggleSort('name')"
-                :type="sortConfig.field === 'name' ? 'primary' : 'default'"
-              >
-                名称 {{ getSortIcon("name") }}
-              </n-button>
-              <n-button
-                @click="toggleSort('server')"
-                :type="sortConfig.field === 'server' ? 'primary' : 'default'"
-              >
-                服务器 {{ getSortIcon("server") }}
-              </n-button>
-              <n-button
-                @click="toggleSort('createdAt')"
-                :type="sortConfig.field === 'createdAt' ? 'primary' : 'default'"
-              >
-                创建时间 {{ getSortIcon("createdAt") }}
-              </n-button>
-              <n-button
-                @click="toggleSort('lastUsed')"
-                :type="sortConfig.field === 'lastUsed' ? 'primary' : 'default'"
-              >
-                最后使用 {{ getSortIcon("lastUsed") }}
-              </n-button>
-            </n-button-group>
-          </n-space>
-          <div class="header-actions">
-            <n-button type="success" @click="goToDashboard">
-              <template #icon>
-                <n-icon>
-                  <List />
-                </n-icon>
-              </template>
-              批量功能
-            </n-button>
-
+          <h2>
+            我的Token列表 ({{ sortedTokens.length }}个)
+            <small v-if="sortedTokens.length !== tokenStore.gameTokens.length">
+              / 共{{ tokenStore.gameTokens.length }}个
+            </small>
+          </h2>
+          <div class="primary-actions">
             <n-button
               v-if="!showImportForm"
+              size="small"
               type="primary"
-              @click="showImportForm = true"
+              @click="openshowImportForm"
             >
-              <template #icon>
-                <n-icon>
-                  <Add />
-                </n-icon>
-              </template>
+              <template #icon><n-icon><Add /></n-icon></template>
               添加Token
             </n-button>
-
             <n-dropdown :options="bulkOptions" @select="handleBulkAction">
-              <n-button>
+              <n-button size="small" type="success">
                 <template #icon>
-                  <n-icon>
-                    <Menu />
-                  </n-icon>
+                  <n-icon><Menu /></n-icon>
                 </template>
                 批量操作
               </n-button>
             </n-dropdown>
           </div>
+        </div>
+
+        <div class="view-group-toolbar">
+          <n-radio-group v-model:value="viewMode" size="small">
+            <n-radio-button value="list">列表</n-radio-button>
+            <n-radio-button value="card">卡片</n-radio-button>
+          </n-radio-group>
+          <div class="group-actions">
+            <n-button size="small" type="info" @click="openGroupManager">
+              分组维护
+            </n-button>
+          </div>
+        </div>
+
+        <div class="token-group-tabs" role="tablist" aria-label="Token分组">
+          <button
+            v-for="tab in groupTabs"
+            :key="tab.id"
+            type="button"
+            role="tab"
+            class="token-group-tab"
+            :class="{ active: activeGroupId === tab.id }"
+            :aria-selected="activeGroupId === tab.id"
+            :style="activeGroupId === tab.id && tab.color
+              ? { borderColor: tab.color, color: tab.color }
+              : undefined"
+            @click="activeGroupId = tab.id"
+          >
+            <span
+              v-if="tab.color"
+              class="token-group-tab-dot"
+              :style="{ backgroundColor: tab.color }"
+            />
+            {{ tab.name }}
+            <span class="token-group-tab-count">{{ tab.count }}</span>
+          </button>
+        </div>
+
+        <div class="token-sort-row">
+          <n-button-group size="small">
+            <n-button
+              @click="toggleSort('name')"
+              :type="sortConfig.field === 'name' ? 'primary' : 'default'"
+            >名称 {{ getSortIcon("name") }}</n-button>
+            <n-button
+              @click="toggleSort('server')"
+              :type="sortConfig.field === 'server' ? 'primary' : 'default'"
+            >服务器 {{ getSortIcon("server") }}</n-button>
+            <n-button
+              @click="toggleSort('createdAt')"
+              :type="sortConfig.field === 'createdAt' ? 'primary' : 'default'"
+            >创建时间 {{ getSortIcon("createdAt") }}</n-button>
+            <n-button
+              @click="toggleSort('lastUsed')"
+              :type="sortConfig.field === 'lastUsed' ? 'primary' : 'default'"
+            >最后使用 {{ getSortIcon("lastUsed") }}</n-button>
+          </n-button-group>
         </div>
 
         <div class="tokens-grid" v-if="viewMode === 'card'">
@@ -183,6 +199,14 @@
                   v-if="token.server"
                   >{{ token.server }}</a-tag
                 >
+                <n-tag
+                  v-for="group in tokenStore.getTokenGroups(token.id)"
+                  :key="group.id"
+                  size="small"
+                  :color="{ color: group.color, textColor: '#fff' }"
+                >
+                  {{ group.name }}
+                </n-tag>
                 <!-- 连接状态指示器 -->
                 <a-badge
                   :status="getTokenStyle(token.id)"
@@ -400,6 +424,14 @@
                       v-if="token.server"
                       >{{ token.server }}</n-tag
                     >
+                    <n-tag
+                      v-for="group in tokenStore.getTokenGroups(token.id)"
+                      :key="group.id"
+                      size="small"
+                      :color="{ color: group.color, textColor: '#fff' }"
+                    >
+                      {{ group.name }}
+                    </n-tag>
                     <!-- 备注信息 - 显示在服务器信息后面 -->
                     <div
                       v-if="editingRemark === token.id"
@@ -558,6 +590,7 @@
       </a-empty>
     </div>
 
+    <TokenGroupManager v-model:show="showGroupManageModal" />
     <!-- 编辑Token模态框 -->
     <n-modal
       v-model:show="showEditModal"
@@ -611,6 +644,7 @@
 </template>
 
 <script setup>
+import TokenGroupManager from "@/components/Common/TokenGroupManager.vue";
 import ManualTokenForm from "./manual.vue";
 import UrlTokenForm from "./url.vue";
 import BinTokenForm from "./bin.vue";
@@ -624,7 +658,6 @@ import {
   Create,
   EllipsisHorizontal,
   Grid,
-  List,
   Home,
   Key,
   Menu,
@@ -660,15 +693,26 @@ const tokenStore = useTokenStore();
 const rateLimitWaiting = ref(false);
 const rateLimitMessage = ref("");
 
+const UNGROUPED_TAB_ID = "__ungrouped__";
+
 // 响应式数据
 const showImportForm = ref(false);
 const isImporting = ref(false);
 const showEditModal = ref(false);
+const showGroupManageModal = ref(false);
+const activeGroupId = ref(UNGROUPED_TAB_ID);
 const importFormRef = ref(null);
 const urlFormRef = ref(null);
 const editFormRef = ref(null);
 const editingToken = ref(null);
-const importMethod = ref("manual");
+const importMethod = ref("singlebin");
+const importMethods = [
+  { value: "manual", label: "手动输入" },
+  { value: "url", label: "URL获取" },
+  { value: "wxQrcode", label: "微信扫码获取" },
+  { value: "bin", label: "BIN多角色获取" },
+  { value: "singlebin", label: "BIN单角色获取" },
+];
 const refreshingTokens = ref(new Set());
 const connectingTokens = ref(new Set());
 // 从localStorage读取上次的视图模式，默认为列表视图
@@ -678,6 +722,82 @@ const dragIndex = ref(null);
 // 备注编辑状态管理
 const editingRemark = ref(null); // 当前正在编辑备注的tokenId
 const tempRemarks = ref({}); // 临时保存编辑中的备注内容
+
+const validTokenIdSet = computed(
+  () => new Set(tokenStore.gameTokens.map((token) => token.id)),
+);
+
+const groupedTokenIdSet = computed(() => {
+  const ids = new Set();
+  tokenStore.tokenGroups.forEach((group) => {
+    group.tokenIds.forEach((tokenId) => {
+      if (validTokenIdSet.value.has(tokenId)) ids.add(tokenId);
+    });
+  });
+  return ids;
+});
+
+const availableUngroupedTokens = computed(() =>
+  tokenStore.gameTokens.filter((token) => !groupedTokenIdSet.value.has(token.id)),
+);
+
+const sortedTokenGroups = computed(() =>
+  tokenStore.tokenGroups
+    .map((group, index) => ({
+      group,
+      index,
+      sortOrder:
+        Number.isInteger(group.sortOrder) && group.sortOrder >= 1
+          ? group.sortOrder
+          : index + 1,
+    }))
+    .sort((itemA, itemB) => itemA.sortOrder - itemB.sortOrder || itemA.index - itemB.index)
+    .map((item) => item.group),
+);
+
+const groupTabs = computed(() => [
+  {
+    id: UNGROUPED_TAB_ID,
+    name: "未分组",
+    color: "",
+    count: availableUngroupedTokens.value.length,
+  },
+  ...sortedTokenGroups.value.map((group) => ({
+    id: group.id,
+    name: group.name,
+    color: group.color,
+    count: group.tokenIds.filter((tokenId) => validTokenIdSet.value.has(tokenId))
+      .length,
+  })),
+]);
+
+const activeGroup = computed(() =>
+  tokenStore.tokenGroups.find((group) => group.id === activeGroupId.value),
+);
+
+const tokensInActiveGroup = computed(() => {
+  if (activeGroupId.value === UNGROUPED_TAB_ID) {
+    return availableUngroupedTokens.value;
+  }
+  const tokenIds = new Set(activeGroup.value?.tokenIds || []);
+  return tokenStore.gameTokens.filter((token) => tokenIds.has(token.id));
+});
+
+watch(
+  () => tokenStore.tokenGroups.map((group) => group.id),
+  (groupIds) => {
+    if (
+      activeGroupId.value !== UNGROUPED_TAB_ID &&
+      !groupIds.includes(activeGroupId.value)
+    ) {
+      activeGroupId.value = UNGROUPED_TAB_ID;
+    }
+  },
+);
+
+const openGroupManager = () => {
+  showGroupManageModal.value = true;
+};
 
 // 监听视图模式变化，保存到localStorage
 watch(viewMode, (newViewMode) => {
@@ -698,10 +818,10 @@ const sortConfig = ref(
 // 排序后的游戏角色Token列表
 const sortedTokens = computed(() => {
   if (sortConfig.value.field === "manual") {
-    return tokenStore.gameTokens;
+    return tokensInActiveGroup.value;
   }
 
-  return [...tokenStore.gameTokens].sort((tokenA, tokenB) => {
+  return [...tokensInActiveGroup.value].sort((tokenA, tokenB) => {
     let valueA, valueB;
 
     // 根据排序字段获取比较值
@@ -784,8 +904,12 @@ const handleDrop = (index, event) => {
   currentTokens.splice(dragIndex.value, 1);
   currentTokens.splice(index, 0, draggedItem);
 
-  // 更新 store
-  tokenStore.gameTokens = currentTokens;
+  // 只替换当前分组在总列表中的相对顺序，保留其他分组的 Token。
+  const visibleTokenIds = new Set(currentTokens.map((token) => token.id));
+  let replacementIndex = 0;
+  tokenStore.gameTokens = tokenStore.gameTokens.map((token) =>
+    visibleTokenIds.has(token.id) ? currentTokens[replacementIndex++] : token,
+  );
 
   // 切换到手动排序模式，防止自动排序打乱顺序
   sortConfig.value.field = "manual";
@@ -824,6 +948,7 @@ const bulkOptions = [
  * 手动打开Token管理卡片
  */
 const openshowImportForm = () => {
+  importMethod.value = "singlebin";
   showImportForm.value = true;
 };
 
@@ -1499,10 +1624,6 @@ const formatTime = (timestamp) => {
   return new Date(timestamp).toLocaleString("zh-CN");
 };
 
-const goToDashboard = () => {
-  router.push("/admin/batch-daily-tasks");
-};
-
 // 开始任务管理 - 直接跳转到控制台
 const startTaskManagement = (token) => {
   // 选择token
@@ -1881,13 +2002,412 @@ onUnmounted(() => {
   }
 }
 
-.header-actions {
+.primary-actions,
+.group-actions,
+.view-group-toolbar {
   display: flex;
-  gap: var(--spacing-md);
-  max-width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.primary-actions {
+  justify-content: flex-end;
+}
+
+.view-group-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.group-actions {
+  justify-content: flex-end;
+}
+
+.token-sort-row {
+  margin-bottom: 12px;
+}
+
+.active-group-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: -4px 0 12px;
+  padding: 10px 12px;
+  background: var(--bg-secondary, #f7f8fa);
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+
+.active-group-name,
+.active-group-actions,
+.group-color-options {
+  display: flex;
+  align-items: center;
+}
+
+.active-group-name {
+  min-width: 0;
+  gap: 8px;
+}
+
+.active-group-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.active-group-color {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+}
+
+.active-group-actions {
+  flex: none;
+  gap: 8px;
+}
+
+.group-color-picker,
+.group-sort-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.group-color-picker > span,
+.group-sort-picker > span {
+  flex: none;
+  color: var(--text-secondary);
+}
+
+.group-sort-picker :deep(.n-input-number) {
+  width: 160px;
+}
+
+.group-color-options {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.group-color-option {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 3px solid transparent;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+}
+
+.group-color-option.active {
+  border-color: #fff;
+  box-shadow: 0 0 0 2px currentColor;
+  transform: scale(1.08);
+}
+
+.token-sort-row :deep(.n-button-group) {
+  display: flex;
+  width: 100%;
+}
+
+.token-sort-row :deep(.n-button) {
+  flex: 1 1 0;
+  min-width: 0;
+  padding-inline: 8px;
+}
+
+.token-group-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: var(--spacing-md);
+  padding-bottom: var(--spacing-md);
+  border-bottom: 1px solid var(--border-light);
+}
+
+.token-group-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 6px 12px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary, #f7f8fa);
+  border: 1px solid var(--border-medium, #d9d9d9);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: var(--font-size-sm);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.token-group-tab.active {
+  color: #18a058;
+  background: rgba(24, 160, 88, 0.08);
+  border-color: #18a058;
+  font-weight: 600;
+}
+
+.token-group-tab-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.token-group-tab-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  color: inherit;
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.section-header h2 small {
+  color: var(--text-tertiary);
+  font-size: 0.65em;
+  font-weight: 400;
+}
+
+:global(.add-group-members-modal.n-card) {
+  width: min(680px, calc(100vw - 24px));
+  max-height: calc(100dvh - var(--mobile-status-bar-gap, 24px) - 90px);
+}
+
+:global(.add-group-members-modal .n-card__content) {
+  overflow-y: auto;
+}
+
+:global(.batch-group-manage-modal.n-card) {
+  width: min(800px, calc(100vw - 24px));
+  max-height: calc(100dvh - var(--mobile-status-bar-gap, 24px) - 90px);
+}
+
+:global(.batch-group-manage-modal .n-card__content) {
+  overflow-y: auto;
+}
+
+.batch-group-create-row,
+.batch-edit-group-row,
+.batch-current-group-toolbar,
+.batch-current-group-actions,
+.batch-color-options,
+.batch-add-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-group-create-row {
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.batch-group-create-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 10px;
+  width: 100%;
+}
+
+.batch-group-field,
+.batch-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-secondary, #666);
+  font-size: 13px;
+}
+
+.batch-group-field :deep(.n-input),
+.batch-group-field :deep(.n-input-number) {
+  width: 100%;
+  min-width: 0;
+}
+
+.batch-group-sort-field {
+  width: 96px;
+}
+
+.batch-group-create-row > :deep(.n-button) {
+  align-self: flex-start;
+}
+
+.batch-color-options {
+  flex-wrap: wrap;
+}
+
+.batch-color-option {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.batch-color-option.active {
+  border-color: #111;
+  box-shadow: 0 0 0 1px #fff inset;
+}
+
+.batch-manage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 10px 0 14px;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+}
+
+.batch-manage-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 5px 10px;
+  color: #666;
+  background: #f7f8fa;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.batch-manage-tab.active {
+  color: #18a058;
+  background: rgba(24, 160, 88, 0.08);
+  border-color: #18a058;
+  font-weight: 600;
+}
+
+.batch-manage-tab-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.batch-manage-tab-count {
+  min-width: 20px;
+  padding: 1px 5px;
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.batch-current-group-panel {
+  margin-top: 14px;
+}
+
+.batch-current-group-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.batch-edit-group-row {
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.batch-edit-group-row :deep(.n-input) {
+  flex: 1;
+  min-width: 150px;
+}
+
+.batch-edit-group-row .batch-color-field {
+  width: 100%;
+}
+
+.batch-member-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.batch-member-item,
+.batch-member-grid.selectable :deep(.n-checkbox) {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+}
+
+.batch-member-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-member-item small {
+  color: #999;
+}
+
+.batch-member-item :deep(.n-button) {
+  margin-left: auto;
+}
+
+.batch-add-members-panel {
+  margin-top: 14px;
+  padding: 12px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.batch-add-members-panel p {
+  margin: 0 0 10px;
+}
+
+.batch-add-member-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.member-modal-tip {
+  margin: 0 0 12px;
+  color: var(--text-secondary);
+}
+
+.add-member-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.add-member-grid :deep(.n-checkbox) {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border-light);
+  border-radius: 8px;
+}
+
+.add-member-name {
+  display: inline-block;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.add-member-grid small {
+  margin-left: 6px;
+  color: var(--text-tertiary);
 }
 
 .tokens-grid {
@@ -2240,6 +2760,36 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
+  :global(.token-import-modal.arco-modal) {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+  }
+
+  :global(.token-import-modal .arco-modal-body) {
+    padding: 12px !important;
+    overflow-x: hidden !important;
+  }
+
+  .card-header,
+  .card-body,
+  .import-method-tabs {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .card-header .import-method-tabs {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+    justify-content: stretch;
+  }
+
+  .import-method-button {
+    width: 100%;
+    min-width: 0;
+  }
+
   .container {
     padding: 0 var(--spacing-md);
   }
@@ -2254,8 +2804,68 @@ onUnmounted(() => {
 
   .section-header {
     flex-direction: column;
-    gap: var(--spacing-md);
+    gap: 10px;
     align-items: stretch;
+  }
+
+  .primary-actions {
+    display: flex;
+    gap: 8px;
+  }
+
+  .primary-actions > :deep(*) {
+    flex: 1 1 0;
+  }
+
+  .primary-actions :deep(.n-button) {
+    width: 100%;
+  }
+
+  .view-group-toolbar {
+    gap: 8px;
+  }
+
+  .group-actions {
+    gap: 6px;
+  }
+
+  .group-actions :deep(.n-button) {
+    padding-inline: 8px;
+  }
+
+  .batch-group-create-row {
+    display: flex;
+  }
+
+  .batch-current-group-toolbar {
+    align-items: flex-start;
+  }
+
+  .batch-current-group-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .batch-member-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .token-sort-row :deep(.n-button) {
+    padding-inline: 4px;
+    font-size: 12px;
+  }
+
+  .token-group-tabs {
+    gap: 6px;
+  }
+
+  .token-group-tab {
+    min-height: 34px;
+    padding: 5px 9px;
+  }
+
+  .add-member-grid {
+    grid-template-columns: 1fr;
   }
 
   .token-timestamps {

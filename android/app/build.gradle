@@ -1,5 +1,12 @@
 apply plugin: 'com.android.application'
 
+def releaseStorePassword = System.getenv('XYZW_RELEASE_STORE_PASSWORD')
+def releaseKeyPassword = System.getenv('XYZW_RELEASE_KEY_PASSWORD')
+def releaseKeyAlias = System.getenv('XYZW_RELEASE_KEY_ALIAS') ?: 'xyzw-release'
+def releaseStorePath = System.getenv('XYZW_RELEASE_STORE_FILE') ?: 'xyzw-release.jks'
+def releaseStore = file(releaseStorePath)
+def releaseSigningConfigured = releaseStore.exists() && releaseStorePassword && releaseKeyPassword
+
 android {
     namespace = "com.zyy.xyzw.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +23,35 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (releaseSigningConfigured) {
+                storeFile releaseStore
+                storePassword releaseStorePassword
+                keyAlias releaseKeyAlias
+                keyPassword releaseKeyPassword
+                enableV1Signing true
+                enableV2Signing true
+                enableV3Signing true
+            }
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
+            minifyEnabled true
+            shrinkResources true
+            if (releaseSigningConfigured) {
+                signingConfig signingConfigs.release
+            } else {
+                logger.warn('Release signing is not configured. Set XYZW_RELEASE_STORE_PASSWORD and XYZW_RELEASE_KEY_PASSWORD.')
+            }
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    applicationVariants.configureEach { variant ->
+        variant.outputs.configureEach {
+            outputFileName = "xyzw-helper-v${variant.versionName}-${variant.buildType.name}.apk"
         }
     }
 }

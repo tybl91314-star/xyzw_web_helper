@@ -113,12 +113,20 @@
                 <tbody>
                   <tr>
                     <td class="avatar-cell" rowspan="8">
-                      <n-avatar
-                        round
-                        :size="60"
-                        :src="memberData.headImg"
-                        class="opponent-avatar"
-                      />
+                      <button
+                        type="button"
+                        class="opponent-avatar-button"
+                        aria-label="查看对手阵容"
+                        @click="showLineupModal = true"
+                      >
+                        <n-avatar
+                          round
+                          :size="60"
+                          :src="memberData.headImg"
+                          class="opponent-avatar"
+                        />
+                        <span>查看阵容</span>
+                      </button>
                     </td>
                     <td class="label-cell">游戏名：</td>
                     <td class="value-cell">
@@ -178,62 +186,6 @@
             </div>
           </div>
 
-          <!-- 右侧对手阵容 -->
-          <div class="info-card heroes-card right-card">
-            <div class="card-title">
-              <h4>对手阵容</h4>
-              <div class="card-title-right">
-                <span class="hero-count"
-                  >{{ memberData.heroList.length }} 名武将</span
-                >
-                <span class="click-hint">（点击头像图片可看详情）</span>
-              </div>
-            </div>
-
-            <div class="heroes-grid compact">
-              <div
-                v-for="hero in memberData.heroList"
-                :key="hero.heroId || hero.heroName"
-                class="hero-card compact"
-                @click="selectHeroInfo(hero)"
-              >
-                <div class="hero-avatar-container">
-                  <div class="hero-circle">
-                    <img
-                      v-if="hero.heroAvate"
-                      :src="hero.heroAvate"
-                      :alt="hero.heroName"
-                      class="hero-avatar-img"
-                    />
-                    <div v-else class="hero-placeholder">
-                      {{ hero.heroName?.substring(0, 2) || "?" }}
-                    </div>
-                  </div>
-                </div>
-
-                <div class="hero-info compact">
-                  <div class="hero-name-row">
-                    <h5 class="hero-name">{{ hero.heroName || "未知武将" }}</h5>
-                    <n-tag
-                      :type="hero.HolyBeast ? 'success' : 'warning'"
-                      size="small"
-                      class="holy-beast-tag"
-                    >
-                      {{ hero.HolyBeast ? "已开四圣" : "未开四圣" }}
-                    </n-tag>
-                  </div>
-                  <div class="hero-stats">
-                    <span class="stat-item">战力: {{ hero.power || "0" }}</span>
-                    <span class="stat-item">星级: {{ hero.star || "0" }}</span>
-                    <span class="stat-item">红数: {{ hero.red || "0" }}</span>
-                    <span class="stat-item" v-if="hero.HolyBeast"
-                      >四圣等级: {{ hero.HBlevel }}</span
-                    >
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
 
         <!-- 切磋结果卡片 -->
@@ -353,6 +305,43 @@
         <n-empty description="请输入对手ID并点击查询按钮获取对手信息" />
       </div>
     </div>
+
+    <!-- 对手阵容模态框 -->
+    <n-modal
+      v-model:show="showLineupModal"
+      class="lineup-modal"
+      preset="card"
+      title="对手阵容"
+      :bordered="false"
+      :style="{ width: '680px' }"
+    >
+      <div class="lineup-modal-grid">
+        <button
+          v-for="hero in memberData?.heroList || []"
+          :key="hero.heroId || hero.heroName"
+          type="button"
+          class="lineup-hero-item"
+          @click="selectHeroInfo(hero)"
+        >
+          <div class="hero-circle">
+            <img
+              v-if="hero.heroAvate"
+              :src="hero.heroAvate"
+              :alt="hero.heroName"
+              class="hero-avatar-img"
+            />
+            <div v-else class="hero-placeholder">
+              {{ hero.heroName?.substring(0, 2) || "?" }}
+            </div>
+          </div>
+          <div class="lineup-hero-summary">
+            <strong>{{ hero.heroName || "未知武将" }}</strong>
+            <span>战力：{{ hero.power || "0" }}</span>
+            <span>星级：{{ hero.star || "0" }} · 红数：{{ hero.red || "0" }}</span>
+          </div>
+        </button>
+      </div>
+    </n-modal>
 
     <!-- 武将详情模态框 -->
     <n-modal
@@ -598,6 +587,7 @@ watch(targetId, (newId, oldId) => {
 });
 // 模态框控制符
 const showHeroModal = ref(false);
+const showLineupModal = ref(false);
 //选中的武将信息
 const heroModealTemp = ref(null);
 const options = [
@@ -631,8 +621,9 @@ const totalPages = computed(() => {
 });
 
 const selectHeroInfo = (heroInfo) => {
-  showHeroModal.value = true;
   heroModealTemp.value = heroInfo;
+  showLineupModal.value = false;
+  showHeroModal.value = true;
 };
 
 // 获取当前页的数据
@@ -1259,6 +1250,19 @@ onMounted(() => {
   border: 2px solid var(--primary-color-light);
 }
 
+.opponent-avatar-button {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--primary-color);
+  font-size: 11px;
+  cursor: pointer;
+}
+
 .info-table .label-cell {
   width: 100px;
   color: var(--text-secondary);
@@ -1305,10 +1309,74 @@ onMounted(() => {
 
 .opponent-main-layout {
   display: grid;
-  grid-template-columns: 320px 1fr;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr;
   gap: 16px;
   margin-bottom: 16px;
+}
+
+.lineup-modal-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lineup-hero-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--border-radius-medium);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.lineup-hero-item .hero-circle {
+  flex: 0 0 56px;
+  width: 56px;
+  height: 56px;
+  margin: 0;
+}
+
+.lineup-hero-summary {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+
+.lineup-hero-summary strong,
+.lineup-hero-summary span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lineup-hero-summary span {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .lineup-modal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .lineup-hero-item {
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px;
+    text-align: center;
+  }
+
+  .lineup-hero-summary {
+    width: 100%;
+  }
 }
 
 @media (max-width: 1200px) {

@@ -12,10 +12,9 @@
 #   public *;
 #}
 
-# Uncomment this to preserve the line number information for
-# debugging stack traces.
-#-keepattributes SourceFile,LineNumberTable
+# Keep runtime annotations used by Android and Capacitor plugin discovery while
+# allowing R8 to rename and optimize application implementation classes.
+-keepattributes RuntimeVisibleAnnotations,RuntimeInvisibleAnnotations,AnnotationDefault
 
-# If you keep the line number information, uncomment this to
-# hide the original source file name.
-#-renamesourcefileattribute SourceFile
+# Do not expose original Java source file names in release stack traces.
+-renamesourcefileattribute SourceFile

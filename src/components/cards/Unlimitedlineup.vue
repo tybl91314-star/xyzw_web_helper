@@ -3507,4 +3507,102 @@ onMounted(() => {
   text-align: center;
   padding: var(--spacing-lg);
 }
+
+@media (max-width: 768px) {
+  .lineup-saver,
+  .lineup-container,
+  .current-team-section,
+  .heroes-grid,
+  .hero-item {
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .toolbar {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .toolbar :deep(.n-button) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .team-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--spacing-sm);
+  }
+
+  .current-team-section {
+    padding: var(--spacing-sm);
+  }
+
+  .current-team-section h4 {
+    flex-wrap: wrap;
+  }
+
+  .hero-item {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: var(--spacing-sm);
+  }
+
+  .hero-info {
+    min-width: 0;
+  }
+
+  .hero-fish {
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .hero-stats .stat-row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .hero-stats span {
+    min-width: 0;
+    padding: 3px 4px;
+    font-size: 10px;
+    white-space: normal;
+  }
+
+  .hero-actions {
+    flex: 1 0 100%;
+    flex-direction: row;
+    min-width: 0;
+    margin-left: 0;
+  }
+
+  .hero-actions :deep(.n-button) {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .team-tabs,
+  .lineup-title-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .team-tabs-left,
+  .team-tabs-right,
+  .lineup-title-left,
+  .lineup-quick-actions {
+    flex-wrap: wrap;
+  }
+
+  .lineup-heroes-row {
+    flex-wrap: wrap;
+  }
+
+  .tech-items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 </style>

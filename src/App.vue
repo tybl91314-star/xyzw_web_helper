@@ -6,6 +6,7 @@
           <n-dialog-provider>
             <div id="app">
               <router-view />
+              <MobileBottomNav />
             </div>
           </n-dialog-provider>
         </n-notification-provider>
@@ -18,6 +19,7 @@
 import { computed, onMounted, onUnmounted } from "vue";
 import { darkTheme } from "naive-ui";
 import { useTheme } from "@/composables/useTheme";
+import MobileBottomNav from "@/components/Common/MobileBottomNav.vue";
 
 const { isDark, initTheme, setupSystemThemeListener, updateReactiveState } =
   useTheme();
@@ -205,6 +207,7 @@ body[data-theme="dark"] .n-popover-container {
 
 #app {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--app-background);
   color: var(--text-color);
   transition:
@@ -222,6 +225,9 @@ body[data-theme="dark"] .n-popover-container {
 html,
 body {
   height: 100%;
+  min-width: 320px;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
   font-family:
     "SF Pro Display",
     -apple-system,
@@ -236,6 +242,113 @@ body {
     sans-serif;
   color: var(--text-color);
   transition: color 0.3s ease;
+}
+
+@media (max-width: 768px) {
+  :root {
+    --mobile-status-bar-gap: max(
+      36px,
+      calc(env(safe-area-inset-top) + 10px)
+    );
+    --mobile-bottom-nav-gap: calc(74px + env(safe-area-inset-bottom));
+  }
+
+  #app {
+    padding-bottom: 0;
+  }
+
+  /*
+   * 底部导航是 fixed，只有不经过 DefaultLayout 的直属页面需要自行预留高度。
+   * 占位放进页面本身，避免 #app 的紫色背景在页面末尾额外露出一截。
+   */
+  #app > :not(.mobile-navigation):not(.default-layout) {
+    padding-bottom: var(--mobile-bottom-nav-gap) !important;
+  }
+
+  /*
+   * Naive UI 的弹窗会 Teleport 到 body，必须在全局统一限制。
+   * 顶部避开 Android 状态栏，底部给固定导航留出空间，长内容只在弹窗内部滚动。
+   */
+  .n-modal-body-wrapper {
+    top: var(--mobile-status-bar-gap) !important;
+    bottom: var(--mobile-bottom-nav-gap) !important;
+    overflow: hidden !important;
+  }
+
+  .n-modal-body-wrapper > .n-scrollbar,
+  .n-modal-body-wrapper > .n-scrollbar > .n-scrollbar-container {
+    height: 100% !important;
+    max-height: 100% !important;
+  }
+
+  .n-modal-scroll-content {
+    min-height: 100% !important;
+    padding: 8px 10px !important;
+  }
+
+  .n-modal {
+    width: auto;
+    max-width: calc(100vw - 20px) !important;
+    max-height: calc(
+      100dvh - var(--mobile-status-bar-gap) -
+        var(--mobile-bottom-nav-gap) - 16px
+    ) !important;
+    margin: auto !important;
+  }
+
+  .n-modal.n-card,
+  .n-modal.n-dialog {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
+  .n-modal.n-card > .n-card-header,
+  .n-modal.n-card > .n-card__footer,
+  .n-modal.n-dialog > .n-dialog__title,
+  .n-modal.n-dialog > .n-dialog__action {
+    flex: 0 0 auto;
+  }
+
+  .n-modal.n-card > .n-card-header {
+    padding: 14px 16px 10px !important;
+  }
+
+  .n-modal.n-card > .n-card__content,
+  .n-modal.n-dialog > .n-dialog__content {
+    min-height: 0 !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .n-modal.n-card > .n-card__content {
+    padding: 12px 16px 16px !important;
+  }
+
+  .n-drawer-container .n-drawer {
+    top: var(--mobile-status-bar-gap) !important;
+    bottom: var(--mobile-bottom-nav-gap) !important;
+    height: auto !important;
+    max-height: calc(
+      100dvh - var(--mobile-status-bar-gap) - var(--mobile-bottom-nav-gap)
+    ) !important;
+  }
+
+  .n-drawer-content .n-drawer-body-content-wrapper {
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  touch-action: manipulation;
 }
 
 /* 滚动条样式 */

@@ -5,10 +5,7 @@
       <div class="nav-container">
         <div class="nav-brand">
           <img src="/icons/xiaoyugan.png" alt="XYZW" class="brand-logo" />
-          <div class="brand-toggle" @click="isMobileMenuOpen = true">
-            <n-icon>
-              <Menu />
-            </n-icon>
+          <div class="brand-toggle">
             <span class="brand-text">XYZW 控制台</span>
           </div>
         </div>
@@ -90,90 +87,6 @@
         </div>
       </div>
     </nav>
-    <n-drawer
-      v-model:show="isMobileMenuOpen"
-      placement="left"
-      style="width: 260px"
-    >
-      <div class="drawer-menu">
-        <router-link
-          to="/admin/dashboard"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Home />
-          </n-icon>
-          <span>首页</span>
-        </router-link>
-        <router-link
-          to="/admin/game-features"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Cube />
-          </n-icon>
-          <span>游戏功能</span>
-        </router-link>
-        <router-link
-          to="/tokens"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <PersonCircle />
-          </n-icon>
-          <span>Token管理</span>
-        </router-link>
-        <router-link
-          to="/admin/daily-tasks"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Settings />
-          </n-icon>
-          <span>任务管理</span>
-        </router-link>
-        <router-link
-          to="/admin/batch-daily-tasks"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Layers />
-          </n-icon>
-          <span>批量日常</span>
-        </router-link>
-        <router-link
-          to="/admin/message-test"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <ChatbubbleEllipsesSharp />
-          </n-icon>
-          <span>消息测试</span>
-        </router-link>
-          <router-link to="/admin/legion-war" class="nav-item" active-class="active"  v-if="isNowInLegionWarTime()" >
-            <n-icon>
-              <LockOpen />
-            </n-icon>
-            <span>实时盐场</span>
-          </router-link>
-        <router-link
-          to="/admin/profile"
-          class="drawer-item"
-          @click="isMobileMenuOpen = false"
-        >
-          <n-icon>
-            <Settings />
-          </n-icon>
-          <span>个人设置</span>
-        </router-link>
-      </div>
-    </n-drawer>
     <div class="main">
       <router-view />
     </div>
@@ -194,42 +107,62 @@ import {
   Settings,
   ChevronDown,
   ChatbubbleEllipsesSharp,
-  LockClosedSharp,LockOpen,
-  Menu,
+  LockOpen,
   Layers,
 } from "@vicons/ionicons5";
 
 import { useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui'
-import { ref } from 'vue'
 import { isNowInLegionWarTime } from '@/utils/clubBattleUtils'
 
 const tokenStore = useTokenStore();
 const router = useRouter();
 const message = useMessage();
 
-const isMobileMenuOpen = ref(false);
-
 const userMenuOptions = [
   {
-    label: "清除所有Token并退出",
-    key: "logout",
+    label: "重新连接",
+    key: "reconnect",
   },
 ];
 
 // 方法
 const handleUserAction = async (key) => {
   switch (key) {
-    case "logout":
-      await tokenStore.clearAllTokens();
-      message.success("已清除所有Token");
-      router.push("/tokens");
+    case "reconnect": {
+      const tokenId = selectedTokenId.value || tokenStore.selectedToken?.id;
+      if (!tokenId) {
+        message.warning("请先选择Token");
+        router.push("/tokens");
+        return;
+      }
+
+      const reconnecting = message.loading("正在重新连接...", {
+        duration: 0,
+      });
+      try {
+        await tokenStore.closeWebSocketConnectionAsync(tokenId);
+        tokenStore.selectToken(tokenId, true);
+        message.success("已开始重新连接");
+      } catch (error) {
+        console.error("重新连接失败:", error);
+        message.error("重新连接失败，请稍后重试");
+      } finally {
+        reconnecting.destroy();
+      }
       break;
+    }
   }
 };
 </script>
 
 <style scoped lang="scss">
+.default-layout {
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg-secondary);
+}
+
 // 导航栏
 .dashboard-nav {
   background: var(--bg-primary);
@@ -238,6 +171,16 @@ const handleUserAction = async (key) => {
   position: sticky;
   top: 0;
   z-index: var(--z-sticky);
+}
+
+.main {
+  min-width: 0;
+  min-height: calc(100dvh - 64px);
+  background: var(--bg-secondary);
+}
+
+.main :deep(> *) {
+  min-height: inherit !important;
 }
 
 .nav-container {
@@ -333,6 +276,18 @@ const handleUserAction = async (key) => {
 }
 
 @media (max-width: 768px) {
+  .main {
+    min-height: calc(100dvh - 56px - env(safe-area-inset-top));
+    padding-bottom: var(--mobile-bottom-nav-gap);
+  }
+
+  .main :deep(> *) {
+    min-height: calc(
+      100dvh - 56px - env(safe-area-inset-top) -
+        var(--mobile-bottom-nav-gap)
+    ) !important;
+  }
+
   .nav-item span {
     display: none;
   }
@@ -350,35 +305,37 @@ const handleUserAction = async (key) => {
     height: 56px;
   }
 
+  .dashboard-nav {
+    padding-top: env(safe-area-inset-top);
+    padding-right: max(var(--spacing-sm), env(safe-area-inset-right));
+    padding-left: max(var(--spacing-sm), env(safe-area-inset-left));
+  }
+
   .brand-logo {
     display: none;
   }
 
   .brand-toggle {
     display: inline-flex;
+    cursor: default;
   }
-}
 
-.drawer-menu {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-md);
-}
+  .nav-brand {
+    margin-right: var(--spacing-sm);
+  }
 
-.drawer-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-sm);
-  padding: var(--spacing-sm) var(--spacing-md);
-  border-radius: var(--border-radius-medium);
-  color: var(--text-secondary);
-  text-decoration: none;
-}
+  .nav-user {
+    gap: var(--spacing-xs);
+  }
 
-.drawer-item.router-link-active {
-  background: var(--primary-color-light);
-  color: var(--primary-color);
+  .username,
+  .user-info > .n-icon {
+    display: none;
+  }
+
+  .user-info {
+    padding: var(--spacing-xs);
+  }
 }
 
 /* 禁用样式：灰化、鼠标禁止、无hover效果 */

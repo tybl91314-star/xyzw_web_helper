@@ -33,33 +33,6 @@
       </div>
     </div>
 
-    <!-- WebSocket 连接状态 -->
-    <div class="ws-status-section">
-      <div class="container">
-        <div class="ws-status-card">
-          <div class="status-header">
-            <h3>连接状态</h3>
-            <n-button text @click="toggleConnection">
-              {{ isConnected ? "断开连接" : "重新连接" }}
-            </n-button>
-          </div>
-          <div class="status-content">
-            <div class="status-item">
-              <span>WebSocket状态:</span>
-              <span :class="connectionClass">{{ connectionStatusText }}</span>
-            </div>
-            <div v-if="tokenStore.selectedToken" class="status-item">
-              <span>当前Token:</span>
-              <span>{{ tokenStore.selectedToken.name }}</span>
-            </div>
-            <div v-if="lastActivity" class="status-item">
-              <span>最后活动:</span>
-              <span>{{ lastActivity }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -76,7 +49,6 @@ const tokenStore = useTokenStore();
 
 // 响应式数据
 const showFeedback = ref(true);
-const lastActivity = ref(null);
 
 // 计算属性
 const connectionStatus = computed(() => {
@@ -89,16 +61,6 @@ const connectionStatusText = computed(() => {
   if (!tokenStore.selectedToken) return "未选择Token";
   const status = tokenStore.getWebSocketStatus(tokenStore.selectedToken.id);
   return status === "connected" ? "已连接" : "未连接";
-});
-
-const connectionClass = computed(() => {
-  return connectionStatus.value === "connected"
-    ? "status-connected"
-    : "status-disconnected";
-});
-
-const isConnected = computed(() => {
-  return connectionStatus.value === "connected";
 });
 
 const pickArenaTargetId = (targets) => {
@@ -234,22 +196,6 @@ const connectWebSocket = () => {
   }
 };
 
-const disconnectWebSocket = () => {
-  if (tokenStore.selectedToken) {
-    const tokenId = tokenStore.selectedToken.id;
-    tokenStore.closeWebSocketConnection(tokenId);
-    message.info("WebSocket连接已断开");
-  }
-};
-
-const toggleConnection = () => {
-  if (connectionStatus.value === "connected") {
-    disconnectWebSocket();
-  } else {
-    connectWebSocket();
-  }
-};
-
 // handleWebSocketMessage 已移除，消息处理由 tokenStore 负责
 
 // 生命周期
@@ -348,22 +294,59 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
+  .game-features-page,
+  .features-grid-section,
   .container {
-    padding: 0 var(--spacing-md);
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .container {
+    padding: 0 var(--spacing-sm);
   }
 
   .page-header {
-    padding: var(--spacing-md) 0;
-    margin-bottom: var(--spacing-md);
+    padding: var(--spacing-sm) 0;
+    margin-bottom: 0;
 
     .header-content {
-      flex-direction: column;
+      flex-direction: row;
       gap: var(--spacing-sm);
-      text-align: center;
+      text-align: left;
+      min-width: 0;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      min-width: 0;
     }
 
     .page-title {
-      font-size: var(--font-size-xl);
+      flex-shrink: 0;
+      font-size: var(--font-size-lg);
+      margin: 0;
+      white-space: nowrap;
+    }
+
+    .page-subtitle {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: var(--font-size-sm);
+    }
+
+    .header-actions {
+      flex-shrink: 0;
+    }
+
+    .connection-status {
+      padding: var(--spacing-xs) var(--spacing-sm);
+      white-space: nowrap;
     }
   }
 
@@ -371,13 +354,6 @@ onUnmounted(() => {
     padding: var(--spacing-md) 0;
   }
 
-  .ws-status-section {
-    padding: 0 0 var(--spacing-lg) 0;
-  }
-
-  .ws-status-card {
-    padding: var(--spacing-md);
-  }
 }
 
 .header-content {
@@ -590,68 +566,6 @@ onUnmounted(() => {
 
 .card-actions {
   margin-top: var(--spacing-lg);
-}
-
-// WebSocket状态区域
-.ws-status-section {
-  padding: 0 0 var(--spacing-xl) 0;
-}
-
-.ws-status-card {
-  background: var(--bg-primary);
-  border-radius: var(--border-radius-large);
-  padding: var(--spacing-lg);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-}
-
-.status-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: var(--spacing-md);
-
-  h3 {
-    font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-semibold);
-    color: var(--text-primary);
-    margin: 0;
-  }
-}
-
-.status-content {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-sm);
-}
-
-.status-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: var(--spacing-sm) 0;
-  border-bottom: 1px solid var(--border-light);
-
-  &:last-child {
-    border-bottom: none;
-  }
-
-  span:first-child {
-    color: var(--text-secondary);
-    font-size: var(--font-size-sm);
-  }
-
-  span:last-child {
-    font-weight: var(--font-weight-medium);
-    font-size: var(--font-size-sm);
-  }
-}
-
-.status-connected {
-  color: var(--success-color);
-}
-
-.status-disconnected {
-  color: var(--error-color);
 }
 
 // 响应式设计

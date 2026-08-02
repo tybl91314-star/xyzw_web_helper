@@ -145,22 +145,18 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from "vue";
-import { useRouter } from "vue-router";
 import { useMessage, useDialog } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
 import DailyTaskCard from "@/components/Daily/DailyTaskCard.vue";
 import { Refresh, ChevronDown, Search, Cube } from "@vicons/ionicons5";
 import { useGameRolesStore } from "@/stores/gameRoles";
 import { useLocalTokenStore } from "@/stores/localTokenManager";
-import { useAuthStore } from "@/stores/auth";
 
-const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const tokenStore = useTokenStore();
 const gameRolesStore = useGameRolesStore();
 const localTokenStore = useLocalTokenStore();
-const authStore = useAuthStore();
 
 // 响应式数据
 const isLoading = ref(false);
@@ -626,12 +622,6 @@ const resetAllTasks = () => {
 
 // 生命周期
 onMounted(async () => {
-  // 确保用户已登录
-  if (!authStore.isAuthenticated) {
-    router.push("/login");
-    return;
-  }
-
   // 初始化游戏角色数据
   if (gameRolesStore.gameRoles.length === 0) {
     await gameRolesStore.fetchGameRoles();

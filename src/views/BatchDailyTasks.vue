@@ -4,44 +4,25 @@
       <!-- Left Column -->
       <div class="left-column">
         <!-- Header -->
-        <div
-          class="page-header"
-          style="
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            flex-wrap: wrap;
-            gap: 12px;
-          "
-        >
-          <div style="display: flex; align-items: center; gap: 16px">
+        <div class="page-header">
+          <div class="header-overview">
             <h2>批量日常任务</h2>
-            <div
-              style="
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                padding: 8px 12px;
-                background-color: #f8f9fa;
-                border-radius: 8px;
-                border: 1px solid #e9ecef;
-              "
-            >
-              <div style="font-size: 14px; color: #495057">
+            <div class="schedule-summary">
+              <div class="schedule-count">
                 共 {{ scheduledTasks.length }} 个定时任务
               </div>
               <div
                 v-if="shortestCountdownTask"
-                style="font-size: 14px; font-weight: 500; color: #1677ff"
+                class="schedule-countdown"
               >
                 即将执行：{{ shortestCountdownTask.task.name }} ({{
                   shortestCountdownTask.countdown.formatted
                 }})
               </div>
-              <div v-else style="font-size: 14px; color: #6c757d">
+              <div v-else class="schedule-empty">
                 暂无定时任务
               </div>
-              <div style="display: flex; gap: 8px">
+              <div class="schedule-actions">
                 <n-button type="primary" size="small" @click="openTaskModal">
                   新增定时任务
                 </n-button>
@@ -61,17 +42,7 @@
               </div>
             </div>
           </div>
-          <div
-            style="
-              display: flex;
-              align-items: center;
-              gap: 12px;
-              padding: 8px 12px;
-              background-color: #f8f9fa;
-              border-radius: 8px;
-              border: 1px solid #e9ecef;
-            "
-          >
+          <div class="batch-actions">
             <n-button
               type="primary"
               @click="startBatch"
@@ -136,7 +107,7 @@
                 </div>
                 <div style="display: flex; gap: 8px; flex-wrap: wrap">
                   <div
-                    v-for="group in tokenGroups"
+                v-for="group in sortedManageTokenGroups"
                     :key="group.id"
                     @click="toggleGroupSelection(group.id)"
                     :style="{
@@ -294,7 +265,24 @@
 
         <!-- Batch Functions -->
         <n-card title="批量功能列表" style="margin-top: 16px">
-          <n-tabs type="line" animated>
+          <div class="batch-function-tab-grid">
+            <n-button
+              v-for="tab in batchFunctionTabs"
+              :key="tab.value"
+              size="small"
+              :type="activeBatchFunctionTab === tab.value ? 'primary' : 'default'"
+              :secondary="activeBatchFunctionTab === tab.value"
+              @click="activeBatchFunctionTab = tab.value"
+            >
+              {{ tab.label }}
+            </n-button>
+          </div>
+          <n-tabs
+            v-model:value="activeBatchFunctionTab"
+            class="batch-function-tabs"
+            type="line"
+            animated
+          >
             <n-tab-pane name="daily" tab="日常">
               <n-space>
                 <n-button
@@ -929,7 +917,7 @@
               </div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap">
                 <n-button
-                  v-for="group in tokenGroups"
+                v-for="group in sortedManageTokenGroups"
                   :key="group.id"
                   size="small"
                   @click="
@@ -1786,7 +1774,7 @@
               </div>
               <div style="display: flex; gap: 6px; flex-wrap: wrap">
                 <n-button
-                  v-for="group in tokenGroups"
+              v-for="group in sortedManageTokenGroups"
                   :key="group.id"
                   size="small"
                   :type="
@@ -1920,7 +1908,7 @@
       style="width: 90%; max-width: 700px"
     >
       <div class="settings-content">
-        <n-grid :cols="2" :x-gap="24">
+        <n-grid class="batch-settings-columns" :cols="2" :x-gap="24">
           <!-- 左列：批量操作设置 -->
           <n-grid-item>
             <n-divider title-placement="left" style="margin: 1px 0 8px 0"
@@ -2533,301 +2521,13 @@
       </div>
     </n-modal>
 
-    <!-- Token Group Management Modal -->
-    <n-modal
-      v-model:show="showGroupManageModal"
-      preset="card"
-      title="分组管理"
-      style="width: 90%; max-width: 800px"
-    >
-      <div class="settings-content">
-        <!-- 创建新分组 -->
-        <n-divider title-placement="left" style="margin: 0 0 16px 0">
-          创建新分组
-        </n-divider>
-        <div style="margin-bottom: 24px">
-          <div
-            style="
-              display: flex;
-              gap: 12px;
-              align-items: center;
-              margin-bottom: 12px;
-              flex-wrap: wrap;
-            "
-          >
-            <n-input
-              v-model:value="newGroupName"
-              placeholder="输入分组名称"
-              style="width: 200px"
-              size="small"
-            />
-            <div style="display: flex; gap: 8px; align-items: center">
-              <span style="font-size: 12px">选择颜色:</span>
-              <div style="display: flex; gap: 6px">
-                <div
-                  v-for="color in groupColors"
-                  :key="color"
-                  :style="{
-                    width: '24px',
-                    height: '24px',
-                    backgroundColor: color,
-                    borderRadius: '4px',
-                    border:
-                      newGroupColor === color
-                        ? '3px solid #000'
-                        : '2px solid #ddd',
-                    cursor: 'pointer',
-                    transition: 'transform 0.2s',
-                  }"
-                  @click="newGroupColor = color"
-                  @mouseover="$event.target.style.transform = 'scale(1.1)'"
-                  @mouseleave="$event.target.style.transform = 'scale(1)'"
-                />
-              </div>
-            </div>
-            <n-button type="primary" size="small" @click="createNewGroup">
-              创建分组
-            </n-button>
-          </div>
-
-          <!-- 选择包含的账号 -->
-          <div
-            style="
-              background: #f9f9f9;
-              padding: 12px;
-              border-radius: 8px;
-              border: 1px solid #eee;
-            "
-          >
-            <div
-              style="
-                display: flex;
-                justify-content: space-between;
-                margin-bottom: 8px;
-              "
-            >
-              <span style="font-size: 13px; font-weight: bold"
-                >包含账号 ({{ newGroupSelectedTokens.length }})</span
-              >
-              <n-space size="small">
-                <n-button size="tiny" @click="selectAllNewGroup">全选</n-button>
-                <n-button size="tiny" @click="deselectAllNewGroup"
-                  >全不选</n-button
-                >
-              </n-space>
-            </div>
-            <div style="max-height: 150px; overflow-y: auto">
-              <n-checkbox-group v-model:value="newGroupSelectedTokens">
-                <n-grid :cols="3" :x-gap="12" :y-gap="8">
-                  <n-grid-item v-for="token in sortedTokens" :key="token.id">
-                    <n-checkbox :value="token.id">{{ token.name }}</n-checkbox>
-                  </n-grid-item>
-                </n-grid>
-              </n-checkbox-group>
-            </div>
-          </div>
-        </div>
-
-        <!-- 分组列表 -->
-        <n-divider title-placement="left" style="margin: 0 0 16px 0">
-          分组列表
-        </n-divider>
-        <div
-          style="
-            max-height: 500px;
-            overflow-y: auto;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            padding: 12px;
-          "
-        >
-          <div
-            v-for="group in tokenGroups"
-            :key="group.id"
-            style="
-              padding: 12px;
-              border: 1px solid #e5e7eb;
-              border-radius: 6px;
-              margin-bottom: 12px;
-              background: #fafafa;
-            "
-          >
-            <div
-              style="
-                display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                gap: 12px;
-              "
-            >
-              <div style="flex: 1">
-                <!-- 编辑模式 -->
-                <div
-                  v-if="editingGroupId === group.id"
-                  style="display: flex; gap: 8px"
-                >
-                  <n-input
-                    v-model:value="editingGroupName"
-                    placeholder="分组名称"
-                    size="small"
-                    style="width: 150px"
-                  />
-                  <div style="display: flex; gap: 6px; align-items: center">
-                    <div
-                      v-for="color in groupColors"
-                      :key="color"
-                      :style="{
-                        width: '20px',
-                        height: '20px',
-                        backgroundColor: color,
-                        borderRadius: '4px',
-                        border:
-                          editingGroupColor === color
-                            ? '3px solid #000'
-                            : '2px solid #ddd',
-                        cursor: 'pointer',
-                      }"
-                      @click="editingGroupColor = color"
-                    />
-                  </div>
-                  <n-button
-                    size="small"
-                    type="primary"
-                    @click="saveEditGroup"
-                    style="width: 60px"
-                  >
-                    保存
-                  </n-button>
-                  <n-button
-                    size="small"
-                    @click="cancelEditGroup"
-                    style="width: 60px"
-                  >
-                    取消
-                  </n-button>
-                </div>
-                <!-- 显示模式 -->
-                <div v-else>
-                  <div
-                    style="
-                      display: flex;
-                      align-items: center;
-                      gap: 8px;
-                      margin-bottom: 8px;
-                    "
-                  >
-                    <div
-                      :style="{
-                        width: '16px',
-                        height: '16px',
-                        backgroundColor: group.color,
-                        borderRadius: '3px',
-                      }"
-                    />
-                    <span style="font-weight: 500; font-size: 14px">
-                      {{ group.name }}
-                    </span>
-                    <n-tag size="small" type="info">
-                      {{ getValidGroupTokenIds(group.id).length }} 个账号
-                    </n-tag>
-                  </div>
-                  <div
-                    style="
-                      display: flex;
-                      gap: 4px;
-                      flex-wrap: wrap;
-                      margin-bottom: 8px;
-                    "
-                  >
-                    <div
-                      v-for="tokenId in getValidGroupTokenIds(group.id)"
-                      :key="tokenId"
-                      style="
-                        padding: 2px 8px;
-                        background: white;
-                        border: 1px solid #ddd;
-                        border-radius: 4px;
-                        font-size: 12px;
-                        display: flex;
-                        align-items: center;
-                        gap: 4px;
-                      "
-                    >
-                      {{ tokens.find((t) => t.id === tokenId)?.name }}
-                      <n-button
-                        size="tiny"
-                        type="error"
-                        text
-                        @click="removeTokenFromSelectedGroup(group.id, tokenId)"
-                      >
-                        ×
-                      </n-button>
-                    </div>
-                  </div>
-                  <!-- 添加token到分组 -->
-                  <div style="margin-bottom: 8px">
-                    <n-select
-                      placeholder="添加账号到分组"
-                      size="small"
-                      filterable
-                      :options="
-                        tokens
-                          .filter(
-                            (t) =>
-                              !getValidGroupTokenIds(group.id).includes(t.id),
-                          )
-                          .map((t) => ({ label: t.name, value: t.id }))
-                      "
-                      @update:value="
-                        (tokenId) => {
-                          if (tokenId) {
-                            addTokenToSelectedGroup(group.id, tokenId);
-                          }
-                        }
-                      "
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <!-- 操作按钮 -->
-              <div
-                style="display: flex; gap: 8px"
-                v-if="editingGroupId !== group.id"
-              >
-                <n-button size="small" @click="startEditGroup(group.id)">
-                  编辑
-                </n-button>
-                <n-button
-                  size="small"
-                  type="error"
-                  @click="deleteGroup(group.id)"
-                >
-                  删除
-                </n-button>
-              </div>
-            </div>
-          </div>
-
-          <div
-            v-if="tokenGroups.length === 0"
-            style="text-align: center; padding: 24px; color: #86909c"
-          >
-            暂无分组，请创建一个新分组
-          </div>
-        </div>
-
-        <!-- 关闭按钮 -->
-        <div class="modal-actions" style="margin-top: 20px; text-align: right">
-          <n-button @click="showGroupManageModal = false">关闭</n-button>
-        </div>
-      </div>
-    </n-modal>
+    <TokenGroupManager v-model:show="showGroupManageModal" />
   </div>
 </template>
 
 <script setup>
 // Import required dependencies
+import TokenGroupManager from "@/components/Common/TokenGroupManager.vue";
 import {
   ref,
   computed,
@@ -2907,6 +2607,16 @@ import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 const tokenStore = useTokenStore();
 const message = useMessage();
 const weirdTowerMaxClimb = ref(DEFAULT_WEIRD_TOWER_MAX_CLIMB);
+const activeBatchFunctionTab = ref("daily");
+const batchFunctionTabs = [
+  { value: "daily", label: "日常" },
+  { value: "dungeon", label: "副本" },
+  { value: "baoku", label: "宝库" },
+  { value: "weirdTower", label: "怪异塔" },
+  { value: "resource", label: "资源" },
+  { value: "legacy", label: "功法" },
+  { value: "monthly", label: "月度" },
+];
 
 // 排序配置（从localStorage读取，与TokenImport共享）
 const savedSortConfig = localStorage.getItem("tokenSortConfig");
@@ -3120,23 +2830,20 @@ const shouldStop = ref(false);
 const showGroupManageModal = ref(false);
 const showGroupSelectModal = ref(false);
 const selectedGroups = ref([]); // 选中的分组ID列表
-const newGroupName = ref("");
-const newGroupColor = ref("#1677ff");
-const newGroupSelectedTokens = ref([]); // 新建分组时选中的Token ID列表
-const editingGroupId = ref(null);
-const editingGroupName = ref("");
-const editingGroupColor = ref("");
 const taskScheduleSelectedGroupIds = ref([]); // 定时任务中通过分组按钮选中的分组ID列表
-const groupColors = [
-  "#1677ff", // 蓝色
-  "#52c41a", // 绿色
-  "#faad14", // 橙色
-  "#f5222d", // 红色
-  "#722ed1", // 紫色
-  "#13c2c2", // 青色
-  "#eb2f96", // 粉色
-  "#fa8c16", // 赤红色
-];
+const sortedManageTokenGroups = computed(() =>
+  tokenGroups.value
+    .map((group, index) => ({
+      group,
+      index,
+      sortOrder:
+        Number.isInteger(group.sortOrder) && group.sortOrder >= 1
+          ? group.sortOrder
+          : index + 1,
+    }))
+    .sort((itemA, itemB) => itemA.sortOrder - itemB.sortOrder || itemA.index - itemB.index)
+    .map((item) => item.group),
+);
 
 // ======================
 // War Guess Feature
@@ -5318,98 +5025,6 @@ const getStatusText = (tokenId) => {
   return "等待中";
 };
 
-// =====================
-// Token分组管理相关方法
-// =====================
-
-/**
- * 创建新分组
- */
-const createNewGroup = () => {
-  if (!newGroupName.value.trim()) {
-    message.warning("请输入分组名称");
-    return;
-  }
-
-  const newGroup = tokenStore.createTokenGroup(
-    newGroupName.value.trim(),
-    newGroupColor.value,
-  );
-
-  // 添加选中的Token到新分组
-  if (newGroupSelectedTokens.value.length > 0) {
-    newGroupSelectedTokens.value.forEach((tokenId) => {
-      tokenStore.addTokenToGroup(newGroup.id, tokenId);
-    });
-  }
-
-  message.success("分组创建成功");
-  newGroupName.value = "";
-  newGroupColor.value = "#1677ff";
-  newGroupSelectedTokens.value = [];
-};
-
-const selectAllNewGroup = () => {
-  newGroupSelectedTokens.value = sortedTokens.value.map((t) => t.id);
-};
-
-const deselectAllNewGroup = () => {
-  newGroupSelectedTokens.value = [];
-};
-
-/**
- * 删除分组
- */
-const deleteGroup = (groupId) => {
-  if (confirm("确定要删除这个分组吗？分组中的token不会被删除。")) {
-    tokenStore.deleteTokenGroup(groupId);
-    message.success("分组已删除");
-  }
-};
-
-/**
- * 保存编辑的分组
- */
-const saveEditGroup = () => {
-  if (!editingGroupId.value) return;
-
-  if (!editingGroupName.value.trim()) {
-    message.warning("请输入分组名称");
-    return;
-  }
-
-  tokenStore.updateTokenGroup(editingGroupId.value, {
-    name: editingGroupName.value.trim(),
-    color: editingGroupColor.value,
-  });
-
-  message.success("分组已更新");
-  editingGroupId.value = null;
-  editingGroupName.value = "";
-  editingGroupColor.value = "";
-};
-
-/**
- * 开始编辑分组
- */
-const startEditGroup = (groupId) => {
-  const group = tokenGroups.value.find((g) => g.id === groupId);
-  if (group) {
-    editingGroupId.value = groupId;
-    editingGroupName.value = group.name;
-    editingGroupColor.value = group.color;
-  }
-};
-
-/**
- * 取消编辑分组
- */
-const cancelEditGroup = () => {
-  editingGroupId.value = null;
-  editingGroupName.value = "";
-  editingGroupColor.value = "";
-};
-
 /**
  * 切换分组选择状态
  */
@@ -5957,7 +5572,73 @@ const stopBatch = () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 20px;
+}
+
+.header-overview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  flex: 1 1 620px;
+}
+
+.header-overview h2 {
+  flex: 0 0 auto;
+  margin: 0;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
+.schedule-summary,
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background-color: #f8f9fa;
+  border: 1px solid #e9ecef;
+  border-radius: 8px;
+}
+
+.schedule-summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+}
+
+.schedule-count,
+.schedule-countdown,
+.schedule-empty {
+  font-size: 14px;
+}
+
+.schedule-count {
+  color: #495057;
+}
+
+.schedule-countdown {
+  min-width: 0;
+  font-weight: 500;
+  color: #1677ff;
+  overflow-wrap: anywhere;
+}
+
+.schedule-empty {
+  color: #6c757d;
+}
+
+.schedule-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.batch-actions {
+  flex: 0 1 auto;
+  flex-wrap: wrap;
 }
 
 .token-item {
@@ -6151,11 +5832,208 @@ const stopBatch = () => {
   font-size: 14px;
 }
 
+.batch-function-tab-grid {
+  display: none;
+}
+
 /* Responsive Design */
 @media (max-width: 1200px) {
   .right-column {
     width: 380px;
   }
+}
+
+:global(.batch-group-manage-modal.n-card) {
+  width: min(800px, calc(100vw - 24px));
+  max-height: calc(100dvh - var(--mobile-status-bar-gap, 24px) - 90px);
+}
+
+:global(.batch-group-manage-modal .n-card__content) {
+  overflow-y: auto;
+}
+
+.batch-group-create-row,
+.batch-edit-group-row,
+.batch-current-group-toolbar,
+.batch-current-group-actions,
+.batch-color-options,
+.batch-add-member-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.batch-group-create-row {
+  flex-direction: column;
+  align-items: stretch;
+  margin-bottom: 14px;
+}
+
+.batch-group-create-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  gap: 10px;
+  width: 100%;
+}
+
+.batch-group-field,
+.batch-color-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-secondary, #666);
+  font-size: 13px;
+}
+
+.batch-group-field :deep(.n-input),
+.batch-group-field :deep(.n-input-number) {
+  width: 100%;
+  min-width: 0;
+}
+
+.batch-group-sort-field {
+  width: 96px;
+}
+
+.batch-group-create-row > :deep(.n-button) {
+  align-self: flex-start;
+}
+
+.batch-color-options {
+  flex-wrap: wrap;
+}
+
+.batch-color-option {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.batch-color-option.active {
+  border-color: #111;
+  box-shadow: 0 0 0 1px #fff inset;
+}
+
+.batch-manage-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  padding: 10px 0 14px;
+  border-top: 1px solid #eee;
+  border-bottom: 1px solid #eee;
+}
+
+.batch-manage-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 34px;
+  padding: 5px 10px;
+  color: #666;
+  background: #f7f8fa;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.batch-manage-tab.active {
+  color: #18a058;
+  background: rgba(24, 160, 88, 0.08);
+  border-color: #18a058;
+  font-weight: 600;
+}
+
+.batch-manage-tab-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+
+.batch-manage-tab-count {
+  min-width: 20px;
+  padding: 1px 5px;
+  background: rgba(128, 128, 128, 0.12);
+  border-radius: 999px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.batch-current-group-panel {
+  margin-top: 14px;
+}
+
+.batch-current-group-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.batch-edit-group-row {
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding: 10px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.batch-edit-group-row :deep(.n-input) {
+  flex: 1;
+  min-width: 150px;
+}
+
+.batch-edit-group-row .batch-color-field {
+  width: 100%;
+}
+
+.batch-member-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.batch-member-item,
+.batch-member-grid.selectable :deep(.n-checkbox) {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+}
+
+.batch-member-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-member-item small {
+  color: #999;
+}
+
+.batch-member-item :deep(.n-button) {
+  margin-left: auto;
+}
+
+.batch-add-members-panel {
+  margin-top: 14px;
+  padding: 12px;
+  background: #f7f8fa;
+  border-radius: 8px;
+}
+
+.batch-add-members-panel p {
+  margin: 0 0 10px;
+}
+
+.batch-add-member-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
 }
 
 @media (max-width: 992px) {
@@ -6188,10 +6066,47 @@ const stopBatch = () => {
 }
 
 @media (max-width: 768px) {
+  .batch-group-create-row {
+    display: flex;
+  }
+
+  .batch-current-group-toolbar {
+    align-items: flex-start;
+  }
+
+  .batch-current-group-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .batch-member-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .batch-function-tab-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .batch-function-tab-grid :deep(.n-button) {
+    width: 100%;
+    min-width: 0;
+    padding: 0 4px;
+  }
+
+  .batch-function-tabs :deep(.n-tabs-nav) {
+    display: none;
+  }
+
   .batch-daily-tasks {
-    padding: 12px;
-    height: 100vh;
-    overflow-y: auto;
+    width: 100%;
+    max-width: 100vw;
+    min-height: 0;
+    height: auto;
+    padding: 12px 10px 20px;
+    overflow-y: visible;
     overflow-x: hidden;
   }
 
@@ -6218,11 +6133,96 @@ const stopBatch = () => {
     flex-direction: column;
     gap: 12px;
     align-items: stretch;
+    width: 100%;
+    margin-bottom: 12px;
   }
 
-  .page-header .actions {
-    display: flex;
+  .header-overview {
+    width: 100%;
+    flex: none;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .header-overview h2 {
+    width: 100%;
+    font-size: 22px;
+    white-space: normal;
+    text-align: left;
+  }
+
+  .schedule-summary {
+    width: 100%;
+    padding: 12px;
+    gap: 6px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .schedule-actions,
+  .batch-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
     gap: 8px;
+  }
+
+  .batch-actions {
+    padding: 10px;
+  }
+
+  .schedule-actions :deep(.n-button),
+  .schedule-actions :deep(.n-upload),
+  .schedule-actions :deep(.n-upload-trigger),
+  .batch-actions :deep(.n-button) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .token-list-card,
+  .left-column,
+  .right-column {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .token-list-card :deep(.n-card-header),
+  .token-list-card :deep(.n-card__content) {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .sort-buttons {
+    width: 100%;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .sort-buttons :deep(.n-space) {
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .batch-settings-columns {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .batch-settings-columns > :deep(.n-grid-item) {
+    min-width: 0;
+  }
+
+  .batch-settings-columns .setting-item {
+    gap: 12px;
+  }
+
+  .batch-settings-columns .setting-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    line-height: 1.45;
+    overflow-wrap: normal;
+    word-break: keep-all;
   }
 
   .log-card {

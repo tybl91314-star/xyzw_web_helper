@@ -2866,22 +2866,22 @@ onMounted(() => {
 // 主容器样式
 .club-warrank-container {
   width: 100%;
-  height: 100%;
+  height: auto;
   padding: 0;
   box-sizing: border-box;
   background: var(--bg-primary);
   color: var(--text-primary);
-  overflow: hidden;
+  overflow: visible;
 }
 
 // 卡片样式
 .club-warrank-card {
   width: 100%;
-  height: 100%;
+  height: auto;
   background: var(--bg-primary);
   border-radius: 0;
   box-shadow: none;
-  overflow: hidden;
+  overflow: visible;
   display: flex;
   flex-direction: column;
 }
@@ -3132,9 +3132,9 @@ onMounted(() => {
 
 // 表格内容区
 .table-content {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
+  flex: none;
+  min-height: auto;
+  overflow: visible;
   display: flex;
   flex-direction: column;
   background: var(--bg-primary);
@@ -3178,10 +3178,11 @@ onMounted(() => {
 
   // 表格容器
   .table-container {
-    flex: 1;
-    overflow: auto;
+    flex: none;
+    overflow-x: auto;
+    overflow-y: visible;
     background: var(--bg-primary);
-    height: 100%;
+    height: auto;
 
     // 滚动条样式
     ::-webkit-scrollbar {

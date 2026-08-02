@@ -127,6 +127,14 @@ export default defineConfig(async () => {
 
   return {
     plugins,
+    build: {
+      minify: "esbuild",
+      sourcemap: false,
+      target: "es2018",
+    },
+    esbuild: {
+      drop: ["debugger"],
+    },
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "src"),

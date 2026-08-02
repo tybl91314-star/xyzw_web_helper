@@ -54,8 +54,16 @@
 
       <div class="resources" :class="{ collapsed: !isExpanded }" v-if="hasRole">
         <div v-for="res in resList" :key="res.label" class="res-item">
-          <span class="label">{{ res.label }}</span>
-          <span class="value">{{ res.value }}</span>
+          <img
+            :src="res.icon"
+            :alt="`${res.label}图标`"
+            class="res-icon"
+            loading="lazy"
+          />
+          <div class="res-info">
+            <span class="label">{{ res.label }}</span>
+            <span class="value">{{ res.value }}</span>
+          </div>
         </div>
       </div>
       <div v-if="hasRole && showExpand" class="resources-toggle">
@@ -373,239 +381,297 @@ const display = (n: number | null | undefined) =>
   n == null ? "-" : formatNumber(Number(n));
 const getRawValue = (n: number | null | undefined) =>
   n == null ? 0 : Number(n);
+const resourceIcon = (name: string | number) =>
+  `${import.meta.env.BASE_URL}resource-icons/${name}.png`;
 const resList = computed(() => {
   const allResources = [
-    { label: "金币", value: formatNumber(gold.value), raw: gold.value },
-    { label: "金砖", value: formatNumber(diamond.value), raw: diamond.value },
+    {
+      label: "金币",
+      value: formatNumber(gold.value),
+      raw: gold.value,
+      icon: resourceIcon("gold"),
+    },
+    {
+      label: "金砖",
+      value: formatNumber(diamond.value),
+      raw: diamond.value,
+      icon: resourceIcon("diamond"),
+    },
     {
       label: "普通鱼竿",
       value: display(normalRod.value as any),
       raw: getRawValue(normalRod.value as any),
+      icon: resourceIcon(1011),
     },
     {
       label: "金鱼竿",
       value: display(goldRod.value as any),
       raw: getRawValue(goldRod.value as any),
+      icon: resourceIcon(1012),
     },
     {
       label: "珍珠",
       value: display(pearlFromItems.value as any),
       raw: getRawValue(pearlFromItems.value as any),
+      icon: resourceIcon(1013),
     },
     {
       label: "复活丹",
       value: display(DanFromItems.value as any),
       raw: getRawValue(DanFromItems.value as any),
+      icon: resourceIcon(1017),
     },
     {
       label: "招募令",
       value: display(recruitFromItems.value as any),
       raw: getRawValue(recruitFromItems.value as any),
+      icon: resourceIcon(1001),
     },
     {
       label: "精铁",
       value: display(ironFromItems.value as any),
       raw: getRawValue(ironFromItems.value as any),
+      icon: resourceIcon(1006),
     },
     {
       label: "彩玉",
       value: display(jadeFromItems.value as any),
       raw: getRawValue(jadeFromItems.value as any),
+      icon: resourceIcon(1023),
     },
     {
       label: "进阶石",
       value: display(advanceStoneFromItems.value as any),
       raw: getRawValue(advanceStoneFromItems.value as any),
+      icon: resourceIcon(1003),
     },
     {
       label: "蓝玉",
       value: display(blueJadeFromItems.value as any),
       raw: getRawValue(blueJadeFromItems.value as any),
+      icon: resourceIcon(10002),
     },
     {
       label: "红玉",
       value: display(redJadeFromItems.value as any),
       raw: getRawValue(redJadeFromItems.value as any),
+      icon: resourceIcon(10003),
     },
     {
       label: "四圣宝珠碎片",
       value: display(fourSaintFragmentFromItems.value as any),
       raw: getRawValue(fourSaintFragmentFromItems.value as any),
+      icon: resourceIcon(10101),
     },
     {
       label: "金币袋子",
       value: display(goldBagFromItems.value as any),
       raw: getRawValue(goldBagFromItems.value as any),
+      icon: resourceIcon(3001),
     },
     {
       label: "金砖袋子",
       value: display(diamondBagFromItems.value as any),
       raw: getRawValue(diamondBagFromItems.value as any),
+      icon: resourceIcon(3002),
     },
     {
       label: "紫色随机碎片",
       value: display(purpleFragmentFromItems.value as any),
       raw: getRawValue(purpleFragmentFromItems.value as any),
+      icon: resourceIcon(3005),
     },
     {
       label: "橙色随机碎片",
       value: display(orangeFragmentFromItems.value as any),
       raw: getRawValue(orangeFragmentFromItems.value as any),
+      icon: resourceIcon(3006),
     },
     {
       label: "红色随机碎片",
       value: display(redFragmentFromItems.value as any),
       raw: getRawValue(redFragmentFromItems.value as any),
+      icon: resourceIcon(3007),
     },
     {
       label: "精铁袋子",
       value: display(ironBagFromItems.value as any),
       raw: getRawValue(ironBagFromItems.value as any),
+      icon: resourceIcon(3008),
     },
     {
       label: "进阶袋子",
       value: display(advanceBagFromItems.value as any),
       raw: getRawValue(advanceBagFromItems.value as any),
+      icon: resourceIcon(3009),
     },
     {
       label: "梦魇袋子",
       value: display(nightmareBagFromItems.value as any),
       raw: getRawValue(nightmareBagFromItems.value as any),
+      icon: resourceIcon(3010),
     },
     {
       label: "白玉袋子",
       value: display(whiteJadeBagFromItems.value as any),
       raw: getRawValue(whiteJadeBagFromItems.value as any),
+      icon: resourceIcon(3011),
     },
     {
       label: "扳手袋子",
       value: display(wrenchBagFromItems.value as any),
       raw: getRawValue(wrenchBagFromItems.value as any),
+      icon: resourceIcon(3012),
     },
     {
       label: "聚宝盆",
       value: display(treasureBowlFromItems.value as any),
       raw: getRawValue(treasureBowlFromItems.value as any),
+      icon: resourceIcon(3020),
     },
     {
       label: "豪华聚宝盆",
       value: display(luxuryTreasureBowlFromItems.value as any),
       raw: getRawValue(luxuryTreasureBowlFromItems.value as any),
+      icon: resourceIcon(3021),
     },
     {
       label: "红色万能碎片",
       value: display(redUniversalFragmentFromItems.value as any),
       raw: getRawValue(redUniversalFragmentFromItems.value as any),
+      icon: resourceIcon(3201),
     },
     {
       label: "橙色万能碎片",
       value: display(orangeUniversalFragmentFromItems.value as any),
       raw: getRawValue(orangeUniversalFragmentFromItems.value as any),
+      icon: resourceIcon(3302),
     },
     {
       label: "盐靛",
       value: display(indigoFromItems.value as any),
       raw: getRawValue(indigoFromItems.value as any),
+      icon: resourceIcon(1019),
     },
     {
       label: "晶石",
       value: display(crystalFromItems.value as any),
       raw: getRawValue(crystalFromItems.value as any),
+      icon: resourceIcon(1016),
     },
     {
       label: "皮肤币",
       value: display(skinCoinFromItems.value as any),
       raw: getRawValue(skinCoinFromItems.value as any),
+      icon: resourceIcon(1020),
     },
     {
       label: "扫荡魔毯",
       value: display(sweepCarpetFromItems.value as any),
       raw: getRawValue(sweepCarpetFromItems.value as any),
+      icon: resourceIcon(1021),
     },
     {
       label: "白玉",
       value: display(whiteJadeFromItems.value as any),
       raw: getRawValue(whiteJadeFromItems.value as any),
+      icon: resourceIcon(1022),
     },
     {
       label: "贝壳",
       value: display(shellFromItems.value as any),
       raw: getRawValue(shellFromItems.value as any),
+      icon: resourceIcon(1033),
     },
     {
       label: "金盐靛",
       value: display(goldIndigoFromItems.value as any),
       raw: getRawValue(goldIndigoFromItems.value as any),
+      icon: resourceIcon(1035),
     },
     {
       label: "竞技场门票",
       value: display(arenaTicketFromItems.value as any),
       raw: getRawValue(arenaTicketFromItems.value as any),
+      icon: resourceIcon(1007),
     },
     {
       label: "木制宝箱",
       value: display(woodChestFromItems.value as any),
       raw: getRawValue(woodChestFromItems.value as any),
+      icon: resourceIcon(2001),
     },
     {
       label: "青铜宝箱",
       value: display(bronzeChestFromItems.value as any),
       raw: getRawValue(bronzeChestFromItems.value as any),
+      icon: resourceIcon(2002),
     },
     {
       label: "黄金宝箱",
       value: display(goldChestFromItems.value as any),
       raw: getRawValue(goldChestFromItems.value as any),
+      icon: resourceIcon(2003),
     },
     {
       label: "铂金宝箱",
       value: display(platinumChestFromItems.value as any),
       raw: getRawValue(platinumChestFromItems.value as any),
+      icon: resourceIcon(2004),
     },
     {
       label: "钻石宝箱",
       value: display(diamondChestFromItems.value as any),
       raw: getRawValue(diamondChestFromItems.value as any),
+      icon: resourceIcon(2005),
     },
     {
       label: "刷新券",
       value: display(refreshCouponFromItems.value as any),
       raw: getRawValue(refreshCouponFromItems.value as any),
+      icon: resourceIcon(35002),
     },
     {
       label: "零件",
       value: display(partsFromItems.value as any),
       raw: getRawValue(partsFromItems.value as any),
+      icon: resourceIcon(35009),
     },
     {
       label: "木柴火把",
       value: display(woodTorchFromItems.value as any),
       raw: getRawValue(woodTorchFromItems.value as any),
+      icon: resourceIcon(1008),
     },
     {
       label: "青铜火把",
       value: display(bronzeTorchFromItems.value as any),
       raw: getRawValue(bronzeTorchFromItems.value as any),
+      icon: resourceIcon(1009),
     },
     {
       label: "咸神火把",
       value: display(godTorchFromItems.value as any),
       raw: getRawValue(godTorchFromItems.value as any),
+      icon: resourceIcon(1010),
     },
     {
       label: "军团币",
       value: display(legionCoinFromItems.value as any),
       raw: getRawValue(legionCoinFromItems.value as any),
+      icon: resourceIcon(1014),
     },
     {
       label: "扳手",
       value: display(wrenchFromItems.value as any),
       raw: getRawValue(wrenchFromItems.value as any),
+      icon: resourceIcon(1026),
     },
     {
       label: "助威币",
       value: display(cheerCoinFromItems.value as any),
       raw: getRawValue(cheerCoinFromItems.value as any),
+      icon: resourceIcon(2101),
     },
   ];
 
@@ -864,11 +930,9 @@ watch(() => roleInfo.value, initializeAvatar, { deep: true });
   }
 
   .res-item {
-    padding: 6px 8px;
-    flex-direction: column;
-    align-items: flex-start;
+    padding: 7px 8px;
     justify-content: center;
-    gap: 2px;
+    gap: 8px;
 
     .label {
       font-size: 11px;
@@ -953,7 +1017,7 @@ watch(() => roleInfo.value, initializeAvatar, { deep: true });
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
   margin-top: 10px;
-  --res-item-height: 44px;
+  --res-item-height: 58px;
 }
 
 .resources.collapsed {
@@ -969,7 +1033,22 @@ watch(() => roleInfo.value, initializeAvatar, { deep: true });
   min-height: var(--res-item-height);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
+}
+
+.res-icon {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.res-info {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .resources-toggle {
@@ -982,9 +1061,11 @@ watch(() => roleInfo.value, initializeAvatar, { deep: true });
 .res-item .label {
   color: var(--text-secondary);
   font-size: 12px;
+  line-height: 1.25;
 }
 
 .res-item .value {
   font-weight: var(--font-weight-semibold);
+  line-height: 1.25;
 }
 </style>
