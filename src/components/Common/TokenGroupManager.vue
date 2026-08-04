@@ -8,9 +8,23 @@
   >
     <div class="manager-heading">
       <span class="manager-hint">选择分组后可查看和维护成员</span>
-      <n-button size="small" type="primary" @click="openCreateModal">
-        增加分组
-      </n-button>
+      <div class="manager-actions">
+        <n-button size="small" type="primary" @click="openCreateModal">
+          增加分组
+        </n-button>
+        <n-button
+          size="small"
+          :disabled="!activeGroup"
+          @click="openEditModal"
+        >编辑</n-button>
+        <n-button
+          size="small"
+          type="error"
+          ghost
+          :disabled="!activeGroup"
+          @click="deleteActiveGroup"
+        >删除</n-button>
+      </div>
     </div>
 
     <div class="group-tabs" role="tablist" aria-label="分组管理">
@@ -37,15 +51,12 @@
     <section class="current-group-panel">
       <div class="current-group-toolbar">
         <strong>{{ activeGroup?.name || "未分组" }}</strong>
-        <div v-if="activeGroup" class="current-group-actions">
-          <n-button size="small" type="info" @click="openAddMembersModal">
-            添加成员
-          </n-button>
-          <n-button size="small" @click="openEditModal">编辑</n-button>
-          <n-button size="small" type="error" ghost @click="deleteActiveGroup">
-            删除
-          </n-button>
-        </div>
+        <n-button
+          v-if="activeGroup"
+          size="small"
+          type="info"
+          @click="openAddMembersModal"
+        >添加成员</n-button>
       </div>
 
       <n-empty
@@ -190,40 +201,75 @@ const GroupForm = defineComponent({
   setup(formProps, { emit: formEmit }) {
     return () =>
       h("div", { class: "group-form" }, [
-        h("label", { class: "form-field name-field" }, [
-          h("span", "分组名称"),
-          h(NInput, {
-            value: formProps.name,
-            maxlength: 30,
-            placeholder: "输入分组名称",
-            autofocus: true,
-            "onUpdate:value": (value) => formEmit("update:name", value),
-            onKeyup: (event) => {
-              if (event.key === "Enter") formEmit("submit");
-            },
-          }),
-        ]),
-        h("label", { class: "form-field sort-field" }, [
-          h("span", "排序（数字越小越靠前）"),
-          h(NInputNumber, {
-            value: formProps.sortOrder,
-            min: 1,
-            precision: 0,
-            placeholder: "1",
-            "onUpdate:value": (value) => formEmit("update:sortOrder", value),
-          }),
+        h("div", {
+          class: "form-primary-row",
+          style: {
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) 76px",
+            alignItems: "end",
+            gap: "12px",
+          },
+        }, [
+          h("label", { class: "form-field name-field" }, [
+            h("span", "名称"),
+            h(NInput, {
+              value: formProps.name,
+              maxlength: 30,
+              placeholder: "输入分组名称",
+              autofocus: true,
+              "onUpdate:value": (value) => formEmit("update:name", value),
+              onKeyup: (event) => {
+                if (event.key === "Enter") formEmit("submit");
+              },
+            }),
+          ]),
+          h("label", { class: "form-field sort-field" }, [
+            h("span", "排序"),
+            h(NInputNumber, {
+              value: formProps.sortOrder,
+              min: 1,
+              max: 999,
+              precision: 0,
+              showButton: false,
+              placeholder: "1",
+              style: { width: "76px" },
+              "onUpdate:value": (value) => formEmit("update:sortOrder", value),
+            }),
+          ]),
         ]),
         h("div", { class: "form-field color-field" }, [
-          h("span", "分组颜色"),
+          h("span", "颜色"),
           h(
             "div",
-            { class: "color-options" },
+            {
+              class: "color-options",
+              style: {
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "center",
+                gap: "10px",
+                minHeight: "40px",
+              },
+            },
             formProps.colors.map((color) =>
               h("button", {
                 key: color,
                 type: "button",
                 class: ["color-option", { active: formProps.color === color }],
-                style: { backgroundColor: color },
+                style: {
+                  display: "inline-block",
+                  width: "36px",
+                  height: "36px",
+                  flex: "0 0 36px",
+                  padding: "0",
+                  background: color,
+                  border:
+                    formProps.color === color
+                      ? "3px solid #111"
+                      : "3px solid transparent",
+                  borderRadius: "50%",
+                  boxShadow: "0 0 0 2px #fff inset",
+                },
                 onClick: () => formEmit("update:color", color),
                 "aria-label": `选择颜色 ${color}`,
               }),
@@ -402,9 +448,10 @@ const deleteActiveGroup = () => {
   max-height: calc(100dvh - var(--safe-area-top, 0px) - var(--mobile-bottom-nav-height, 0px) - 32px);
 }
 :global(.token-group-members-modal .n-card__content) { overflow-y: auto; }
+:global(.token-group-form-modal .n-card__content) { overflow-y: auto; }
 .manager-heading,
+.manager-actions,
 .current-group-toolbar,
-.current-group-actions,
 .modal-actions,
 .color-options { display: flex; align-items: center; gap: 8px; }
 .manager-heading { justify-content: space-between; margin-bottom: 12px; }
@@ -425,21 +472,20 @@ const deleteActiveGroup = () => {
 .selectable :deep(.n-checkbox__label) { display: flex; gap: 6px; min-width: 0; }
 .selectable small { color: var(--text-color-3); }
 .modal-actions { justify-content: flex-end; }
-.group-form { display: grid; grid-template-columns: minmax(0, 1fr) 180px; gap: 14px; }
+.group-form { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.form-primary-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px; align-items: end; gap: 12px; }
 .form-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .form-field > span { color: var(--text-color-2); font-size: 13px; }
-.color-field { grid-column: 1 / -1; }
-.color-options { flex-wrap: wrap; }
+.sort-field :deep(.n-input-number) { width: 76px; max-width: 100%; }
+.color-options { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-height: 40px; }
 .color-option { width: 34px; height: 34px; border: 3px solid transparent; border-radius: 50%; }
 .color-option.active { border-color: var(--text-color-1); box-shadow: 0 0 0 2px var(--card-color) inset; }
 @media (max-width: 600px) {
   .manager-hint { display: none; }
   .manager-heading { justify-content: flex-end; }
-  .current-group-toolbar { align-items: flex-start; flex-direction: column; }
-  .current-group-actions { width: 100%; }
-  .current-group-actions :deep(.n-button) { flex: 1; }
+  .manager-actions { width: 100%; }
+  .manager-actions :deep(.n-button) { flex: 1; }
+  .current-group-toolbar { align-items: center; }
   .member-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .group-form { grid-template-columns: minmax(0, 1fr) 112px; }
-  .sort-field > span { font-size: 12px; }
 }
 </style>

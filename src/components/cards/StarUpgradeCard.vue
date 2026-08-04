@@ -216,16 +216,13 @@ const runHeroUpgrade = async (mod) => {
           break;
         }
         try {
-          const res = await tokenStore.sendMessageWithPromise(
+          await tokenStore.sendMessageWithPromise(
             tokenId,
             "hero_heroupgradestar",
             { heroId },
             8000,
           );
-          const ok =
-            res && (res.code === 0 || res.success === true || res.result === 0);
-          addLog(`英雄ID:${heroId} 升星第${i}/10次`, ok ? "success" : "error");
-          if (!ok) throw new Error("升星失败");
+          addLog(`英雄ID:${heroId} 升星第${i}/10次`, "success");
         } catch (err) {
           addLog(`英雄ID:${heroId} 升星第${i}/10次失败，跳过剩余次数`, "error");
           skip = true;
@@ -268,19 +265,13 @@ const runBookUpgrade = async (mod) => {
           break;
         }
         try {
-          const res = await tokenStore.sendMessageWithPromise(
+          await tokenStore.sendMessageWithPromise(
             tokenId,
             "book_upgrade",
             { heroId },
             8000,
           );
-          const ok =
-            res && (res.code === 0 || res.success === true || res.result === 0);
-          addLog(
-            `英雄ID:${heroId} 图鉴升星第${i}/10次`,
-            ok ? "success" : "error",
-          );
-          if (!ok) throw new Error("图鉴升星失败");
+          addLog(`英雄ID:${heroId} 图鉴升星第${i}/10次`, "success");
         } catch (err) {
           addLog(
             `英雄ID:${heroId} 图鉴升星第${i}/10次失败，跳过剩余次数`,

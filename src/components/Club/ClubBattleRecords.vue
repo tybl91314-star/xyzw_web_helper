@@ -31,10 +31,19 @@
       <div class="function-section">
         <div class="function-left">
           <div class="export-options">
-            <n-radio-group v-model:value="currentStyle" size="small">
-              <n-radio-button value="style1">样式一</n-radio-button>
-              <n-radio-button value="style2">样式二</n-radio-button>
-            </n-radio-group>
+            <div class="report-style-selector" role="group" aria-label="战报样式">
+              <button
+                v-for="option in reportStyleOptions"
+                :key="option.value"
+                type="button"
+                class="report-style-button"
+                :class="{ active: currentStyle === option.value }"
+                :aria-pressed="currentStyle === option.value"
+                @click="currentStyle = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
             <n-checkbox-group v-model:value="exportmethod" name="group-exportmethod" size="small">
               <n-checkbox value="1">表格导出</n-checkbox>
               <n-checkbox value="2">图片导出</n-checkbox>
@@ -92,7 +101,11 @@
         <!-- 战绩列表 -->
         <div v-else-if="battleRecords && battleRecords.roleDetailsList" class="records-wrapper">
          <!-- 样式一 -->
-          <div v-if="currentStyle === 'style1'" ref="exportDom" class="records-list style-1">
+          <div
+            v-if="currentStyle === 'style1' || currentStyle === 'style3'"
+            ref="exportDom"
+            :class="['records-list', 'style-1', { 'style-3': currentStyle === 'style3' }]"
+          >
              <!-- 头部信息 -->
              <div class="style1-header">
                 <h2>{{ queryDate }} {{ club.name || '俱乐部' }}盐场周报</h2>
@@ -217,7 +230,11 @@
           </div>
           
           <!-- 样式二 -->
-          <div v-else-if="currentStyle === 'style2'" ref="exportDom" class="records-list style-2">
+          <div
+            v-else-if="currentStyle === 'style2' || currentStyle === 'style4'"
+            ref="exportDom"
+            :class="['records-list', 'style-2', { 'style-4': currentStyle === 'style4' }]"
+          >
              <div class="style2-header">
                 <div class="style2-title">
                    <span class="trophy-icon">🏆</span>
@@ -228,6 +245,7 @@
                 </div>
              </div>
              
+             <div class="style2-side-content">
              <!-- 战绩总览 -->
              <div class="style2-dashboard">
                 <div class="dashboard-stats">
@@ -365,6 +383,7 @@
                    </div>
                 </div>
              </div>
+             </div>
 
              <!-- 详细列表 -->
              <div class="style2-table-wrapper">
@@ -439,8 +458,10 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useMessage, NCheckboxGroup, NCheckbox, NRadioGroup, NRadioButton } from 'naive-ui'
 import { useTokenStore } from '@/stores/tokenStore'
-import html2canvas from 'html2canvas';
-import { downloadCanvasAsImage } from "@/utils/imageExport";
+import {
+  downloadCanvasAsImage,
+  renderFullElementToCanvas,
+} from "@/utils/imageExport";
 import {
   Refresh,
   Copy,
@@ -453,6 +474,12 @@ import {
 } from '@/utils/clubBattleUtils'
 
 const currentStyle = ref(localStorage.getItem('club_battle_records_style') || 'style1')
+const reportStyleOptions = [
+  { label: '样式一', value: 'style1' },
+  { label: '样式二', value: 'style2' },
+  { label: '样式三', value: 'style3' },
+  { label: '样式四', value: 'style4' },
+]
 
 watch(currentStyle, (newStyle) => {
   localStorage.setItem('club_battle_records_style', newStyle)
@@ -712,10 +739,10 @@ const handleExport = async () => {
 
   try {
     if (exportmethod.value.includes('1')) {
-      const exportText = formatBattleRecordsForExport(battleRecords.value.roleDetailsList, queryDate.value)
+      await formatBattleRecordsForExport(battleRecords.value.roleDetailsList, queryDate.value)
     }
     if (exportmethod.value.includes('2')) {
-      exportToImage()
+      await exportToImage()
     }
     message.success('导出成功')
   } catch (error) {
@@ -732,37 +759,11 @@ const exportToImage = async () => {
   }
 
   try {
-    // 临时移除战神榜内容区域的最大高度限制，确保所有内容都可见
-    const godRankingContents = exportDom.value.querySelectorAll('.god-ranking-content');
-    const originalStyles = [];
-    
-    godRankingContents.forEach(content => {
-      originalStyles.push({
-        element: content,
-        maxHeight: content.style.maxHeight,
-        overflow: content.style.overflow
-      });
-      content.style.maxHeight = 'none';
-      content.style.overflow = 'visible';
-    });
-
-    // 5. 用html2canvas渲染DOM为Canvas
-    const canvas = await html2canvas(exportDom.value, {
-      scale: 2, // 放大2倍，解决图片模糊问题
-      useCORS: true, // 允许跨域图片（若DOM内有远程图片，需开启）
-      backgroundColor: '#ffffff', // 避免透明背景（默认透明）
-      logging: false // 关闭控制台日志
-    });
-
-    // 恢复战神榜内容区域的原始样式
-    originalStyles.forEach(({ element, maxHeight, overflow }) => {
-      element.style.maxHeight = maxHeight;
-      element.style.overflow = overflow;
-    });
+    const canvas = await renderFullElementToCanvas(exportDom.value);
 
     // 6. Canvas转图片链接并下载
     const filename = queryDate.value.replace("/",'年').replace("/",'月')+'日盐场战报.png';
-    downloadCanvasAsImage(canvas, filename);
+    await downloadCanvasAsImage(canvas, filename);
   } catch (err) {
     console.error('DOM转图片失败：', err);
     alert('导出图片失败，请重试');
@@ -921,6 +922,37 @@ onMounted(() => {
   padding: var(--spacing-md);
 }
 
+.report-style-selector {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  width: 100%;
+}
+
+.report-style-button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-right-width: 0;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #333);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.report-style-button:first-child { border-radius: 4px 0 0 4px; }
+.report-style-button:last-child { border-right-width: 1px; border-radius: 0 4px 4px 0; }
+.report-style-button.active {
+  position: relative;
+  z-index: 1;
+  border-color: var(--primary-color, #18a058);
+  border-right-width: 1px;
+  color: var(--primary-color, #18a058);
+  box-shadow: 0 0 0 1px var(--primary-color, #18a058);
+}
+.report-style-button.active + .report-style-button { border-left-width: 0; }
+
 .loading-state,
 .empty-state {
   display: flex;
@@ -985,6 +1017,7 @@ onMounted(() => {
 
 .style1-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -1009,13 +1042,30 @@ onMounted(() => {
   background-color: #f9f9f9;
 }
 
-.col-rank { width: 50px; }
-.col-name { text-align: left !important; padding-left: 10px !important; }
+.col-rank { width: 42px; }
+.col-name { width: 92px; text-align: center !important; padding: 5px 3px !important; }
+.col-kill,
+.col-death,
+.col-occupy,
+.col-revive { width: 50px; }
+.col-kd { width: 54px; }
 
 .player-info {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 8px;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.player-info > span {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
 }
 
 .player-avatar-small {
@@ -1175,6 +1225,10 @@ onMounted(() => {
   display: flex;
   gap: 20px;
   margin-bottom: 20px;
+}
+
+.style2-side-content {
+  display: contents;
 }
 
 .dashboard-stats {
@@ -1453,15 +1507,14 @@ onMounted(() => {
 
 .bar-cell {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  max-width: 150px;
+  flex-direction: column;
+  width: 100px;
+  margin: 0 auto;
 }
 
 .bar-val {
-  width: 30px;
-  text-align: right;
+  margin-bottom: 2px;
+  text-align: left;
   font-weight: bold;
   font-size: 12px;
 }
@@ -1470,16 +1523,16 @@ onMounted(() => {
 .bar-val.orange { color: #ffab40; }
 
 .progress-bg {
-  flex: 1;
-  height: 6px;
+  width: 100%;
+  height: 4px;
   background: #f0f0f0;
-  border-radius: 3px;
+  border-radius: 2px;
   overflow: hidden;
 }
 
 .progress-fill {
   height: 100%;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 .progress-fill.red { background: #ff5252; }
 .progress-fill.orange { background: #ffab40; }
@@ -1491,8 +1544,120 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+  .records-container {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .battle-records-content {
+    flex: none;
+    height: auto;
+    overflow: visible;
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .function-section {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .function-section .function-left,
+  .function-section .export-options {
+    width: 100%;
+  }
+
+  .function-section .export-options {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .function-section :deep(.n-checkbox-group) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .function-section .function-right {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    width: 100%;
+  }
+
+  .records-wrapper,
+  .records-list {
+    width: 100%;
+    min-width: 0;
+  }
+
   .style1-content { flex-direction: column; }
   .style1-table-container, .style1-summary { width: 100%; }
+  .style1-table-container { overflow: visible; min-width: 0; }
+  .style-1,
+  .style-2 { padding-left: 0; padding-right: 0; border-radius: 0; }
+  .style1-content { gap: 10px; }
+  .style1-table { width: 100%; min-width: 0; table-layout: fixed; font-size: 10px; }
+  .style1-table th { padding: 7px 1px; font-size: 10px; overflow-wrap: anywhere; }
+  .style1-table td { padding: 5px 1px; font-size: 10px; }
+  .style1-table .col-rank { width: 11%; }
+  .style1-table .col-name { width: 25%; padding-left: 1px !important; padding-right: 1px !important; }
+  .style1-table .col-kill,
+  .style1-table .col-death,
+  .style1-table .col-occupy,
+  .style1-table .col-revive,
+  .style1-table .col-kd { width: 12.8%; }
+
+  .style1-summary { min-width: 0; gap: 8px; }
+  .style1-header h2 { margin-left: 0; margin-right: 0; }
+
+  .style2-table-wrapper {
+    overflow: visible;
+    border-radius: 0;
+  }
+
+  .style2-table {
+    table-layout: fixed;
+    font-size: 10px;
+  }
+
+  .style2-table th,
+  .style2-table td {
+    padding: 6px 2px;
+    font-size: 10px;
+  }
+
+  .style2-table th:nth-child(1),
+  .style2-table td:nth-child(1) { width: 11%; }
+  .style2-table th:nth-child(2),
+  .style2-table td:nth-child(2) { width: 25%; text-align: center; padding-left: 2px; }
+  .style2-table th:nth-child(n + 3),
+  .style2-table td:nth-child(n + 3) { width: 12.8%; }
+
+  .player-cell {
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    padding-left: 0;
+    min-width: 0;
+  }
+
+  .player-name-s2 {
+    width: 100%;
+    line-height: 1.25;
+    text-align: center;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .bar-cell {
+    width: 100%;
+    max-width: none;
+    gap: 2px;
+  }
   
   .style2-dashboard { flex-direction: column; }
   .stat-card-row { flex-wrap: wrap; }
@@ -1501,4 +1666,71 @@ onMounted(() => {
   
   .style2-rankings-grid { grid-template-columns: 1fr; }
 }
+
+/* 样式三：样式一视觉，标题在上，排名与统计左右排列 */
+.style-3 .style1-content {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.style-3 .style1-table-container {
+  flex: 0 0 66%;
+  width: 66%;
+  min-width: 0;
+  overflow: visible;
+}
+
+.style-3 .style1-summary {
+  flex: 0 0 calc(34% - 6px);
+  width: calc(34% - 6px);
+  min-width: 0;
+  gap: 6px;
+}
+
+.style-3 .summary-title { padding: 5px 2px; font-size: 10px; }
+.style-3 .summary-item { padding: 5px 6px; font-size: 9px; }
+.style-3 .top3-item { padding: 4px 3px; font-size: 9px; }
+.style-3 .top3-rank { width: 17px; margin-right: 2px; }
+.style-3 .rank-medal-small { font-size: 10px; }
+.style-3 .top3-info { min-width: 0; gap: 2px; }
+.style-3 .player-avatar-xs,
+.style-3 .player-avatar-placeholder-xs { width: 16px; height: 16px; flex: 0 0 16px; }
+.style-3 .top3-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.style-3 .top3-value { width: auto; min-width: 20px; font-size: 9px; }
+
+/* 样式四：样式二视觉，标题在上，排名与数据卡片左右排列 */
+.style-4 {
+  display: grid;
+  grid-template-columns: minmax(0, 66%) minmax(0, calc(34% - 6px));
+  grid-template-rows: auto auto;
+  align-items: start;
+  gap: 6px;
+}
+
+.style-4 .style2-header { grid-column: 1 / -1; grid-row: 1; margin-bottom: 0; }
+.style-4 .style2-table-wrapper { grid-column: 1; grid-row: 2; margin: 0; }
+.style-4 .style2-side-content { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.style-4 .style2-dashboard { margin: 0; gap: 6px; flex-direction: column; }
+.style-4 .style2-rankings-grid { margin: 0; gap: 6px; grid-template-columns: 1fr; }
+.style-4 .dashboard-stats { gap: 6px; }
+.style-4 .stat-card-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.style-4 .stat-card-mini { min-width: 0; padding: 5px 2px; border-radius: 5px; }
+.style-4 .stat-label-mini { font-size: 8px; }
+.style-4 .stat-value-mini { font-size: 11px; }
+.style-4 .dashboard-mvp { width: auto; padding: 6px; border-radius: 6px; flex-direction: column; justify-content: center; gap: 2px; }
+.style-4 .mvp-avatar,
+.style-4 .mvp-avatar-placeholder { width: 34px; height: 34px; }
+.style-4 .mvp-name { display: block; width: 100%; font-size: 10px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
+.style-4 .mvp-label { font-size: 8px; }
+.style-4 .mvp-crown { font-size: 14px; left: auto; right: 4px; }
+.style-4 .rank-card-s2 { padding: 5px 3px; border-radius: 5px; }
+.style-4 .rank-card-title-s2 { margin-bottom: 5px; gap: 3px; font-size: 9px; }
+.style-4 .rank-list-s2 { gap: 4px; }
+.style-4 .rank-item-s2 { font-size: 8px; }
+.style-4 .rank-num-s2 { width: 13px; height: 13px; margin-right: 2px; font-size: 8px; }
+.style-4 .avatar-xxs { width: 14px; height: 14px; }
+.style-4 .style2-table th,
+.style-4 .style2-table td { padding-left: 1px; padding-right: 1px; font-size: 9px; }
 </style>

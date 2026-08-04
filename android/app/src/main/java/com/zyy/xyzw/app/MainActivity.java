@@ -11,6 +11,8 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         registerPlugin(BinFolderPickerPlugin.class);
+        registerPlugin(NativeFileSavePlugin.class);
+        registerPlugin(NativeHttpPlugin.class);
         super.onCreate(savedInstanceState);
 
         // Android 15+ forces edge-to-edge for this target SDK. Keep the WebView

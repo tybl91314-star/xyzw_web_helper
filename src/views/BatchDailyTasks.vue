@@ -588,6 +588,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchMarkMailRead"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  领取邮件并已读
+                </n-button>
+                <n-button
+                  size="small"
                   @click="legion_storebuygoods"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -676,17 +683,21 @@
                 </span>
               </div>
               <div class="log-header-controls">
-                <n-checkbox v-model:checked="autoScrollLog" size="small">
-                  自动滚动
-                </n-checkbox>
-                <n-checkbox v-model:checked="filterErrorsOnly" size="small">
-                  只看错误
-                </n-checkbox>
-                <n-tag v-if="errorCount > 0" type="error" size="small">
-                  {{ errorCount }} 个错误
-                </n-tag>
-                <n-button size="small" @click="clearLogs"> 清空日志 </n-button>
-                <n-button size="small" @click="copyLogs"> 复制日志 </n-button>
+                <div class="log-control-row">
+                  <n-checkbox v-model:checked="autoScrollLog" size="small">
+                    自动滚动
+                  </n-checkbox>
+                  <n-checkbox v-model:checked="filterErrorsOnly" size="small">
+                    只看错误
+                  </n-checkbox>
+                  <n-tag v-if="errorCount > 0" type="error" size="small">
+                    {{ errorCount }} 个错误
+                  </n-tag>
+                </div>
+                <div class="log-control-row">
+                  <n-button size="small" @click="clearLogs"> 清空日志 </n-button>
+                  <n-button size="small" @click="copyLogs"> 复制日志 </n-button>
+                </div>
               </div>
             </div>
           </template>
@@ -1634,6 +1645,13 @@
             <span style="color: #6b7280">选中账号：</span>
             <span>{{ task.selectedTokens.length }} 个</span>
           </div>
+          <div style="margin-bottom: 4px">
+            <span style="color: #6b7280">分批执行：</span>
+            <span>
+              每批 {{ task.accountBatchSize || defaultTaskForm.accountBatchSize }} 个，间隔
+              {{ task.batchIntervalMinutes ?? defaultTaskForm.batchIntervalMinutes }} 分钟
+            </span>
+          </div>
           <div style="margin-bottom: 8px">
             <span style="color: #6b7280">选中任务：</span>
             <span>{{ task.selectedTasks.length }} 个</span>
@@ -1823,6 +1841,34 @@
                 </n-grid-item>
               </n-grid>
             </n-checkbox-group>
+          </div>
+          <div class="setting-item scheduled-batch-settings">
+            <label class="setting-label">账号分批执行</label>
+            <div class="scheduled-batch-fields">
+              <div>
+                <span>每批账号数量</span>
+                <n-input-number
+                  v-model:value="taskForm.accountBatchSize"
+                  :min="1"
+                  :max="1000"
+                  :precision="0"
+                  size="small"
+                />
+              </div>
+              <div>
+                <span>间隔时间（分钟）</span>
+                <n-input-number
+                  v-model:value="taskForm.batchIntervalMinutes"
+                  :min="0"
+                  :max="1440"
+                  :step="0.5"
+                  size="small"
+                />
+              </div>
+            </div>
+            <n-text depth="3" style="font-size: 12px">
+              每批全部执行结束后再等待；最后一批自动执行剩余账号。
+            </n-text>
           </div>
           <div class="setting-item">
             <div
@@ -2544,7 +2590,10 @@ import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
 import { Settings } from "@vicons/ionicons5";
-import { DEFAULT_WEIRD_TOWER_MAX_CLIMB } from "@/utils/towerClimbLimit.js";
+import {
+  createAccountBatches,
+  getBatchIntervalMs,
+} from "@/utils/batch/scheduledTaskBatches.js";
 
 // Import batch task modules
 import {
@@ -2578,6 +2627,10 @@ import {
   isTodayAvailable,
   calculateMonthProgress,
   pickArenaTargetId,
+  isArenaActivityOpenAt,
+  isCarActivityOpenAt,
+  isDreamActivityOpenAt,
+  isVaultActivityOpenAt,
   // Log utilities
   createLogManager,
   addTaskSaveLog,
@@ -2606,7 +2659,7 @@ import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
 // Initialize token store, message service, and task runner
 const tokenStore = useTokenStore();
 const message = useMessage();
-const weirdTowerMaxClimb = ref(DEFAULT_WEIRD_TOWER_MAX_CLIMB);
+const weirdTowerMaxClimb = ref(10);
 const activeBatchFunctionTab = ref("daily");
 const batchFunctionTabs = [
   { value: "daily", label: "日常" },
@@ -2709,27 +2762,25 @@ const getSortIcon = (field) => {
 };
 
 const tokens = computed(() => tokenStore.gameTokens);
-const isCarActivityOpen = computed(() => {
-  const now = new Date();
-  const day = now.getDay();
-  const hour = now.getHours();
-  // 1=Mon, 2=Tue, 3=Wed; 6点之后
-  return day >= 1 && day <= 3 && hour >= 6;
-});
-const ismengjingActivityOpen = computed(() => {
-  const day = new Date().getDay();
-  return day === 0 || day === 1 || day === 3 || day === 4;
-});
-const isbaokuActivityOpen = computed(() => {
-  const day = new Date().getDay();
-  return day != 1 && day != 2;
-});
-const isarenaActivityOpen = computed(() => {
-  const hour = new Date().getHours();
-  return hour >= 6 && hour < 22;
-});
+const activityClock = ref(Date.now());
+let activityClockInterval = null;
+const refreshActivityClock = () => {
+  activityClock.value = Date.now();
+};
+const isCarActivityOpen = computed(() =>
+  isCarActivityOpenAt(activityClock.value),
+);
+const ismengjingActivityOpen = computed(() =>
+  isDreamActivityOpenAt(activityClock.value),
+);
+const isbaokuActivityOpen = computed(() =>
+  isVaultActivityOpenAt(activityClock.value),
+);
+const isarenaActivityOpen = computed(() =>
+  isArenaActivityOpenAt(activityClock.value),
+);
 const getCurrentActivityWeek = computed(() => {
-  const now = new Date();
+  const now = new Date(activityClock.value);
   const start = new Date("2025-12-12T12:00:00"); // 起始时间：黑市周开始
   const weekDuration = 7 * 24 * 60 * 60 * 1000; // 一周毫秒数
   const cycleDuration = 3 * weekDuration; // 三周期毫秒数
@@ -2751,7 +2802,7 @@ const getCurrentActivityWeek = computed(() => {
 const isWeirdTowerActivityOpen = computed(() => {
   if (getCurrentActivityWeek.value !== "黑市周") return false;
 
-  const now = new Date();
+  const now = new Date(activityClock.value);
   const day = now.getDay();
   const hour = now.getHours();
   // 如果是周五，必须在12点之后
@@ -2763,7 +2814,7 @@ const isWeirdTowerActivityOpen = computed(() => {
 
 // 获取本月第四个周日的日期
 const getFourthSundayOfMonth = () => {
-  const now = new Date();
+  const now = new Date(activityClock.value);
   const year = now.getFullYear();
   const month = now.getMonth();
 
@@ -2784,7 +2835,7 @@ const getFourthSundayOfMonth = () => {
 };
 
 const isWarGuessActivityOpen = computed(() => {
-  const now = new Date();
+  const now = new Date(activityClock.value);
 
   // 手动修正：2026年3月1日开放
   if (
@@ -3250,6 +3301,7 @@ const taskGroupDefinitions = [
       "batchClaimBoxPointReward",
       "batchFish",
       "batchRecruit",
+      "batchMarkMailRead",
       "legion_storebuygoods",
     ],
   },
@@ -3332,7 +3384,18 @@ const loadScheduledTasks = () => {
       const parsed = JSON.parse(saved);
 
       // Ensure we have an array
-      scheduledTasks.value = Array.isArray(parsed) ? parsed : [];
+      scheduledTasks.value = Array.isArray(parsed)
+        ? parsed.map((task) => ({
+            ...defaultTaskForm,
+            ...task,
+            selectedTokens: Array.isArray(task.selectedTokens)
+              ? task.selectedTokens
+              : [],
+            selectedTasks: Array.isArray(task.selectedTasks)
+              ? task.selectedTasks
+              : [],
+          }))
+        : [];
     } else {
       scheduledTasks.value = [];
     }
@@ -3365,6 +3428,8 @@ const openTaskModal = () => {
     cronExpression: "",
     selectedTokens: [],
     selectedTasks: [],
+    accountBatchSize: defaultTaskForm.accountBatchSize,
+    batchIntervalMinutes: defaultTaskForm.batchIntervalMinutes,
     enabled: true,
   });
   taskScheduleSelectedGroupIds.value = [];
@@ -3390,7 +3455,7 @@ const editTask = (task) => {
       minutes,
     );
   }
-  Object.assign(taskForm, taskData);
+  Object.assign(taskForm, defaultTaskForm, taskData);
   taskScheduleSelectedGroupIds.value = [];
   showTaskModal.value = true;
 };
@@ -3463,6 +3528,22 @@ const saveTask = () => {
     return;
   }
 
+  if (
+    !Number.isInteger(Number(taskForm.accountBatchSize)) ||
+    Number(taskForm.accountBatchSize) < 1
+  ) {
+    message.warning("每批账号数量必须是大于 0 的整数");
+    return;
+  }
+
+  if (
+    !Number.isFinite(Number(taskForm.batchIntervalMinutes)) ||
+    Number(taskForm.batchIntervalMinutes) < 0
+  ) {
+    message.warning("间隔时间不能小于 0");
+    return;
+  }
+
   // Format runTime as string for storage
   let formattedRunTime = null;
   if (taskForm.runType === "daily" && taskForm.runTime) {
@@ -3482,6 +3563,8 @@ const saveTask = () => {
     cronExpression: taskForm.runType === "cron" ? taskForm.cronExpression : "",
     selectedTokens: [...taskForm.selectedTokens],
     selectedTasks: [...taskForm.selectedTasks],
+    accountBatchSize: Number(taskForm.accountBatchSize),
+    batchIntervalMinutes: Number(taskForm.batchIntervalMinutes),
     enabled: taskForm.enabled,
   };
 
@@ -3942,6 +4025,7 @@ const startScheduler = () => {
   intervalId.value = setInterval(() => {
     try {
       const now = new Date();
+      activityClock.value = now.getTime();
       const currentTime = now.toLocaleTimeString("zh-CN", {
         hour12: false,
         hour: "2-digit",
@@ -4037,6 +4121,9 @@ const handleTokenRefreshWaiting = (data) => {
 
 // Debug: Log initial state when component mounts
 onMounted(() => {
+  refreshActivityClock();
+  activityClockInterval = setInterval(refreshActivityClock, 30 * 1000);
+  document.addEventListener("visibilitychange", refreshActivityClock);
   // Start the task scheduler after all functions are initialized
   scheduleTaskExecution();
   // Start countdown timer
@@ -4048,6 +4135,12 @@ onMounted(() => {
 
 // Cleanup countdown interval on unmount
 onBeforeUnmount(() => {
+  if (activityClockInterval) {
+    clearInterval(activityClockInterval);
+    activityClockInterval = null;
+  }
+  document.removeEventListener("visibilitychange", refreshActivityClock);
+
   if (countdownInterval) {
     clearInterval(countdownInterval);
     countdownInterval = null;
@@ -4172,6 +4265,7 @@ const verifyTaskDependencies = async (task) => {
 
 // Execute a scheduled task with dependency verification
 const executeScheduledTask = async (task) => {
+  refreshActivityClock();
   addLog({
     time: new Date().toLocaleTimeString(),
     message: `=== 开始执行定时任务: ${task.name} ===`,
@@ -4220,16 +4314,32 @@ const executeScheduledTask = async (task) => {
       return;
     }
 
-    // Always use the latest selectedTokens from the task that exist in current tokens.value
-    selectedTokens.value = [...availableTokens];
+    const accountBatches = createAccountBatches(
+      availableTokens,
+      task.accountBatchSize ?? defaultTaskForm.accountBatchSize,
+    );
+    const batchIntervalMs = getBatchIntervalMs(
+      task.batchIntervalMinutes ?? defaultTaskForm.batchIntervalMinutes,
+    );
 
-    // Execute selected tasks in parallel
-    const taskPromises = task.selectedTasks.map(async (taskName) => {
+    for (let batchIndex = 0; batchIndex < accountBatches.length; batchIndex++) {
+      if (shouldStop.value) break;
+
+      const currentBatch = accountBatches[batchIndex];
+      selectedTokens.value = [...currentBatch];
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `定时任务 ${task.name}：执行第 ${batchIndex + 1}/${accountBatches.length} 批，共 ${currentBatch.length} 个账号`,
+        type: "info",
+      });
+
+      // 同一批内沿用原有执行方式；下一批必须等待本批全部结束。
+      const taskPromises = task.selectedTasks.map(async (taskName) => {
       if (shouldStop.value) return;
 
       if (
         ["batchbaoku45", "batchbaoku13"].includes(taskName) &&
-        !isbaokuActivityOpen.value
+        !isVaultActivityOpenAt(Date.now())
       ) {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -4241,7 +4351,7 @@ const executeScheduledTask = async (task) => {
 
       if (
         ["batchmengjing", "batchBuyDreamItems"].includes(taskName) &&
-        !ismengjingActivityOpen.value
+        !isDreamActivityOpenAt(Date.now())
       ) {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -4253,7 +4363,7 @@ const executeScheduledTask = async (task) => {
 
       if (
         ["batchSmartSendCar", "batchClaimCars"].includes(taskName) &&
-        !isCarActivityOpen.value
+        !isCarActivityOpenAt(Date.now())
       ) {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -4265,7 +4375,7 @@ const executeScheduledTask = async (task) => {
 
       if (
         ["batchTopUpArena", "batcharenafight"].includes(taskName) &&
-        !isarenaActivityOpen.value
+        !isArenaActivityOpenAt(Date.now())
       ) {
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -4323,10 +4433,22 @@ const executeScheduledTask = async (task) => {
           type: "error",
         });
       }
-    });
+      });
 
-    // Wait for all tasks to complete
-    await Promise.all(taskPromises);
+      await Promise.all(taskPromises);
+
+      const hasNextBatch = batchIndex < accountBatches.length - 1;
+      if (hasNextBatch && !shouldStop.value && batchIntervalMs > 0) {
+        const intervalMinutes =
+          task.batchIntervalMinutes ?? defaultTaskForm.batchIntervalMinutes;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `第 ${batchIndex + 1} 批执行完成，等待 ${intervalMinutes} 分钟后执行下一批`,
+          type: "info",
+        });
+        await new Promise((resolve) => setTimeout(resolve, batchIntervalMs));
+      }
+    }
 
     addLog({
       time: new Date().toLocaleTimeString(),
@@ -5379,6 +5501,7 @@ const {
   batchHeroUpgrade,
   batchBookUpgrade,
   batchClaimStarRewards,
+  batchMarkMailRead,
   batchClaimPeachTasks,
   batchGenieSweep,
 } = tasksItem;
@@ -5669,10 +5792,36 @@ const stopBatch = () => {
 
 .log-header-controls {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
   justify-content: flex-end;
+}
+
+.log-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
   flex-wrap: nowrap;
+}
+
+.scheduled-batch-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scheduled-batch-fields > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.scheduled-batch-fields :deep(.n-input-number) {
+  width: 120px;
 }
 
 /* Cron Parser Styles */
@@ -5726,12 +5875,6 @@ const stopBatch = () => {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-.log-header-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
 }
 
 .log-container {
@@ -6242,9 +6385,18 @@ const stopBatch = () => {
   }
 
   .log-header-controls {
-    flex-direction: column;
     align-items: flex-start;
-    gap: 4px;
+    width: 100%;
+    gap: 6px;
+  }
+
+  .log-control-row {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .scheduled-batch-fields {
+    grid-template-columns: 1fr;
   }
 
   /* 批量功法残卷赠送样式 */

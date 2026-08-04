@@ -663,6 +663,23 @@ export class GameCommands {
   }
 
   /**
+   * 修改邮件状态（已读状态值为 2）
+   */
+  mail_changestate(ack = 0, seq = 0, params = {}) {
+    return {
+      ack,
+      body: this.g_utils.bon.encode({
+        mailId: 0,
+        state: 2,
+        ...params,
+      }),
+      cmd: "mail_changestate",
+      seq,
+      time: Date.now(),
+    };
+  }
+
+  /**
    * 获取俱乐部战争详情
    */
   legionwar_getdetails(ack = 0, seq = 0, params = {}) {

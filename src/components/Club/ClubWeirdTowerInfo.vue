@@ -105,8 +105,7 @@
 import { ref, computed, onMounted, h, nextTick } from 'vue'
 import { useMessage, NDataTable, NAvatar, NEmpty, NButton, NIcon } from 'naive-ui'
 import { useTokenStore } from '@/stores/tokenStore'
-import html2canvas from 'html2canvas';
-import { downloadCanvasAsImage } from "@/utils/imageExport";
+import { downloadCanvasAsImage, renderFullElementToCanvas } from "@/utils/imageExport";
 import {
   Trophy,
   Refresh,
@@ -148,14 +147,14 @@ const columns = computed(() => {
     {
       title: '序号',
       key: 'index',
-      width: 60,
+      width: 42,
       align: 'center',
       render: (_, index) => index + 1
     },
     {
       title: '头像',
       key: 'headImg',
-      width: 60,
+      width: 48,
       align: 'center',
       render: (row) => {
         if (row.headImg) {
@@ -189,6 +188,7 @@ const columns = computed(() => {
     {
       title: '成员',
       key: 'name',
+      width: 138,
       align: 'left',
       render: (row) => {
         return h(
@@ -219,6 +219,7 @@ const columns = computed(() => {
     {
       title: '层数',
       key: 'towerCountconvert',
+      width: 72,
       align: 'center',
       render: (row) => row.towerCountconvert || '0-0'
     }
@@ -430,13 +431,8 @@ const exportToImage = async () => {
     throw new Error('未找到要导出的DOM元素');
   }
 
-  // 5. 用html2canvas渲染DOM为Canvas
-  const canvas = await html2canvas(exportDom.value, {
-    scale: 2, // 放大2倍，解决图片模糊问题
-    useCORS: true, // 允许跨域图片（若DOM内有远程图片，需开启）
-    backgroundColor: '#ffffff', // 避免透明背景（默认透明）
-    logging: false // 关闭控制台日志
-  });
+  // 临时展开表格和 Naive UI 内部滚动容器，截取完整宽度及全部行。
+  const canvas = await renderFullElementToCanvas(exportDom.value);
 
   // 6. Canvas转图片链接并下载
   const dateStr = gettoday();
@@ -502,6 +498,11 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--spacing-sm);
+}
+
+/* 仅导出时保证四列拥有完整画布，不改变手机页面日常布局。 */
+.records-list.battle-export-layout {
+  min-width: 360px;
 }
 
 .records-info {

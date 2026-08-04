@@ -1,77 +1,90 @@
-/**
- * 将Canvas导出为图片并下载
- * 兼容处理移动端大图导出问题
- * @param {HTMLCanvasElement} canvas - canvas元素
- * @param {string} filename - 文件名
- */
-export const downloadCanvasAsImage = (canvas, filename) => {
+import { saveBlobAsFile } from "@/utils/fileExport";
+import html2canvas from "html2canvas";
+
+const FULL_EXPORT_CONTAINERS = [
+  ".style1-table-container",
+  ".style2-table-wrapper",
+  ".members-table-wrapper",
+  ".god-ranking-content",
+  ".n-data-table",
+  ".n-data-table-wrapper",
+  ".n-data-table-base-table",
+  ".n-data-table-base-table-body",
+  ".n-scrollbar-container",
+  ".n-scrollbar-content",
+];
+
+export async function renderFullElementToCanvas(element, options = {}) {
+  if (!element) throw new Error("未找到要导出的内容");
+
+  const expandedElements = [
+    element,
+    ...element.querySelectorAll(FULL_EXPORT_CONTAINERS.join(",")),
+  ];
+  const originalStyles = expandedElements.map((item) => ({
+    item,
+    style: item.getAttribute("style"),
+  }));
+
   try {
-    // 优先尝试使用 toBlob，因为它处理大文件更有效率且不容易崩溃
-    if (canvas.toBlob) {
-      canvas.toBlob((blob) => {
-        if (!blob) {
-          console.error('Canvas转换Blob失败');
-          fallbackToDataURL(canvas, filename);
-          return;
-        }
-        
-        // 尝试使用 navigator.share (主要针对移动端)
-        // 注意：navigator.share 需要在 HTTPS 环境下，且必须由用户手势触发
-        // 这里作为一种尝试，如果失败则回退到下载链接
-        if (navigator.share && navigator.canShare && navigator.canShare({ files: [new File([blob], filename, { type: blob.type })] })) {
-            const file = new File([blob], filename, { type: blob.type });
-            navigator.share({
-                files: [file],
-                title: '分享图片',
-                text: filename
-            }).catch((err) => {
-                console.log('分享失败，尝试下载:', err);
-                downloadBlob(blob, filename);
-            });
-        } else {
-            downloadBlob(blob, filename);
-        }
-      }, 'image/png');
-    } else {
-      fallbackToDataURL(canvas, filename);
+    const exportWidth = Math.max(
+      element.scrollWidth,
+      element.offsetWidth,
+      ...expandedElements.map((item) => item.scrollWidth || 0),
+    );
+
+    element.classList.add("battle-export-layout");
+    element.style.width = `${exportWidth}px`;
+    element.style.maxWidth = "none";
+    element.style.overflow = "visible";
+
+    expandedElements.slice(1).forEach((item) => {
+      item.style.maxWidth = "none";
+      item.style.maxHeight = "none";
+      item.style.overflow = "visible";
+    });
+
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+    return await html2canvas(element, {
+      scale: 2,
+      useCORS: true,
+      allowTaint: false,
+      backgroundColor: "#ffffff",
+      logging: false,
+      width: Math.ceil(element.scrollWidth),
+      height: Math.ceil(element.scrollHeight),
+      windowWidth: Math.ceil(element.scrollWidth),
+      windowHeight: Math.ceil(element.scrollHeight),
+      scrollX: 0,
+      scrollY: 0,
+      ...options,
+    });
+  } finally {
+    element.classList.remove("battle-export-layout");
+    originalStyles.forEach(({ item, style }) => {
+      if (style === null) item.removeAttribute("style");
+      else item.setAttribute("style", style);
+    });
+  }
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    if (!canvas.toBlob) {
+      fetch(canvas.toDataURL("image/png"))
+        .then((response) => response.blob())
+        .then(resolve, reject);
+      return;
     }
-  } catch (e) {
-    console.error('导出图片出错:', e);
-    fallbackToDataURL(canvas, filename);
-  }
-};
+    canvas.toBlob(
+      (blob) => (blob ? resolve(blob) : reject(new Error("Canvas 转换图片失败"))),
+      "image/png",
+    );
+  });
+}
 
-const downloadBlob = (blob, filename) => {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  
-  // 兼容某些移动端浏览器，添加到body
-  document.body.appendChild(link);
-  
-  try {
-      link.click();
-  } catch (e) {
-      console.error("Link click failed", e);
-  }
-  
-  // 清理
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(url), 100);
-};
-
-const fallbackToDataURL = (canvas, filename) => {
-  try {
-    const imgUrl = canvas.toDataURL('image/png');
-    const link = document.createElement('a');
-    link.href = imgUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  } catch (e) {
-    console.error('DataURL导出失败:', e);
-    alert('导出图片失败，图片可能过大');
-  }
-};
+export async function downloadCanvasAsImage(canvas, filename) {
+  const blob = await canvasToBlob(canvas);
+  return saveBlobAsFile(blob, filename, "image/png");
+}

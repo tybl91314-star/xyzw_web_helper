@@ -13,27 +13,35 @@
         
         <!-- 功能操作区 -->
         <div class="header-actions">
-          <n-radio-group v-model:value="currentStyle" size="small">
-            <n-radio-button value="default">默认</n-radio-button>
-            <n-radio-button value="style1">样式一</n-radio-button>
-            <n-radio-button value="style2">样式二</n-radio-button>
-          </n-radio-group>
-          <n-button size="small" :disabled="loading" @click="handleRefresh">
-            <template #icon>
-              <n-icon>
-                <Refresh />
-              </n-icon>
-            </template>
-            刷新
-          </n-button>
-          <n-button type="primary" size="small" :disabled="!monthlyBattleRecords || loading" @click="handleExport">
-            <template #icon>
-              <n-icon>  
-                <Copy />
-              </n-icon>
-            </template>
-            导出
-          </n-button>
+          <div class="month-style-options">
+            <div class="report-style-selector" role="group" aria-label="本月战报样式">
+              <button
+                v-for="option in reportStyleOptions"
+                :key="option.value"
+                type="button"
+                class="report-style-button"
+                :class="{ active: currentStyle === option.value }"
+                :aria-pressed="currentStyle === option.value"
+                @click="currentStyle = option.value"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
+          <n-checkbox-group v-model:value="exportmethod" class="month-export-options" name="month-exportmethod" size="small">
+            <n-checkbox value="1">Excel 导出</n-checkbox>
+            <n-checkbox value="2">图片导出</n-checkbox>
+          </n-checkbox-group>
+          <div class="month-action-buttons">
+            <n-button size="small" :disabled="loading" @click="handleRefresh">
+              <template #icon><n-icon><Refresh /></n-icon></template>
+              刷新
+            </n-button>
+            <n-button type="primary" size="small" :disabled="!monthlyBattleRecords || loading" @click="handleExport">
+              <template #icon><n-icon><Copy /></n-icon></template>
+              导出
+            </n-button>
+          </div>
         </div>
       </div>
 
@@ -130,7 +138,10 @@
           </div>
 
           <!-- Style 1 -->
-          <div v-else-if="currentStyle === 'style1'" class="style-1">
+          <div
+            v-else-if="currentStyle === 'style1' || currentStyle === 'style3'"
+            :class="['style-1', { 'style-3': currentStyle === 'style3' }]"
+          >
              <div class="style1-header">
                 <h2>{{ currentMonthDisplay }} {{ club.name || '俱乐部' }}盐场月报</h2>
              </div>
@@ -240,7 +251,10 @@
           </div>
           
           <!-- Style 2 -->
-          <div v-else-if="currentStyle === 'style2'" class="style-2">
+          <div
+            v-else-if="currentStyle === 'style2' || currentStyle === 'style4'"
+            :class="['style-2', { 'style-4': currentStyle === 'style4' }]"
+          >
              <div class="style2-header">
                 <div class="style2-title">
                    <span class="trophy-icon">🏆</span>
@@ -251,6 +265,7 @@
                 </div>
              </div>
              
+             <div class="style2-side-content">
              <div class="style2-dashboard">
                 <div class="dashboard-stats">
                    <div class="stat-card-row">
@@ -385,6 +400,7 @@
                    </div>
                 </div>
              </div>
+             </div>
 
              <div class="style2-table-wrapper">
                 <table class="style2-table">
@@ -459,8 +475,10 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useMessage, NCheckboxGroup, NCheckbox, NRadioGroup, NRadioButton } from 'naive-ui'
 import { useTokenStore } from '@/stores/tokenStore'
-import html2canvas from 'html2canvas';
-import { downloadCanvasAsImage } from "@/utils/imageExport";
+import {
+  downloadCanvasAsImage,
+  renderFullElementToCanvas,
+} from "@/utils/imageExport";
 import {
   Trophy,
   Refresh,
@@ -664,6 +682,14 @@ const sortedMembers = computed(() => {
 
 // Style 1 & 2 Support Logic
 const currentStyle = ref(localStorage.getItem('club_month_battle_records_style') || 'default');
+const reportStyleOptions = [
+  { label: '默认', value: 'default' },
+  { label: '样式一', value: 'style1' },
+  { label: '样式二', value: 'style2' },
+  { label: '样式三', value: 'style3' },
+  { label: '样式四', value: 'style4' },
+];
+const exportmethod = ref(['2']);
 
 watch(currentStyle, (newStyle) => {
   localStorage.setItem('club_month_battle_records_style', newStyle)
@@ -864,9 +890,28 @@ const handleExport = async () => {
     return
   }
 
+  if (exportmethod.value.length === 0) {
+    message.warning('请至少选择一种导出格式')
+    return
+  }
+
   try {
-    // 导出图片
-    exportToImage()
+    if (exportmethod.value.includes('1')) {
+      const monthlyRows = sortedMembers.value.map(member => ({
+        roleId: member.roleId,
+        name: member.name,
+        winCnt: member.totalWinCnt || 0,
+        loseCnt: member.totalLoseCnt || 0,
+        buildingCnt: member.totalBuildingCnt || 0,
+        reviveCnt: member.totalResurrection || 0,
+        targetRoleList: []
+      }))
+      const exportDate = currentMonthDisplay.value.replace('年', '/').replace('月', '/01')
+      await formatBattleRecordsForExport(monthlyRows, exportDate)
+    }
+    if (exportmethod.value.includes('2')) {
+      await exportToImage()
+    }
     message.success('导出成功')
   } catch (error) {
     console.error('导出失败:', error)
@@ -882,18 +927,12 @@ const exportToImage = async () => {
   }
 
   try {
-    // 用html2canvas渲染DOM为Canvas
-    const canvas = await html2canvas(exportDom.value, {
-      scale: 2, // 放大2倍，解决图片模糊问题
-      useCORS: true, // 允许跨域图片（若DOM内有远程图片，需开启）
-      backgroundColor: '#ffffff', // 避免透明背景（默认透明）
-      logging: false // 关闭控制台日志
-    });
+    const canvas = await renderFullElementToCanvas(exportDom.value);
 
     // Canvas转图片链接并下载
     const monthYear = currentMonthDisplay.value.replace('年', '-').replace('月', '');
     const filename = `${monthYear}月盐场战绩总览.png`;
-    downloadCanvasAsImage(canvas, filename);
+    await downloadCanvasAsImage(canvas, filename);
   } catch (err) {
     console.error('DOM转图片失败：', err);
     alert('导出图片失败，请重试');
@@ -971,6 +1010,45 @@ onMounted(() => {
   gap: var(--spacing-sm);
   align-items: center;
 }
+
+.month-style-options,
+.month-export-options,
+.month-action-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.report-style-selector {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: 100%;
+}
+
+.report-style-button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 1px solid var(--border-color, #d9d9d9);
+  border-right-width: 0;
+  background: var(--bg-primary, #fff);
+  color: var(--text-primary, #333);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.report-style-button:first-child { border-radius: 4px 0 0 4px; }
+.report-style-button:last-child { border-right-width: 1px; border-radius: 0 4px 4px 0; }
+.report-style-button.active {
+  position: relative;
+  z-index: 1;
+  border-color: var(--primary-color, #18a058);
+  border-right-width: 1px;
+  color: var(--primary-color, #18a058);
+  box-shadow: 0 0 0 1px var(--primary-color, #18a058);
+}
+.report-style-button.active + .report-style-button { border-left-width: 0; }
 
 .battle-records-content {
   flex: 1;
@@ -1148,8 +1226,10 @@ onMounted(() => {
 
 .member-info {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: var(--spacing-sm);
+  justify-content: center;
+  gap: 3px;
 }
 
 .member-avatar {
@@ -1292,6 +1372,7 @@ onMounted(() => {
 
 .style1-table {
   width: 100%;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -1316,13 +1397,33 @@ onMounted(() => {
   background-color: #f9f9f9;
 }
 
-.col-rank { width: 60px; }
-.col-name { text-align: left !important; padding-left: 10px !important; }
+.col-rank { width: 42px; }
+.col-name { width: 92px; text-align: center !important; padding: 5px 3px !important; }
+.col-kill,
+.col-death,
+.col-occupy,
+.col-revive { width: 50px; }
+.col-kd { width: 54px; }
 
 .player-info {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 5px;
+  justify-content: center;
+  gap: 3px;
+  min-width: 0;
+}
+
+.player-info > span {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .player-avatar-small {
@@ -1447,6 +1548,10 @@ onMounted(() => {
     display: flex;
     gap: 20px;
     margin-bottom: 20px;
+}
+
+.style2-side-content {
+    display: contents;
 }
 
 .dashboard-stats {
@@ -1622,8 +1727,108 @@ onMounted(() => {
 }
 
 @media (max-width: 768px) {
+    .club-month-battle-records-container,
+    .club-month-battle-records-card { height: auto; min-height: 0; overflow: visible; }
+    .battle-records-content { flex: none; height: auto; overflow: visible; padding-left: 0; padding-right: 0; }
+    .header-actions { width: 100%; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+    .month-style-options,
+    .month-export-options,
+    .month-action-buttons { width: 100%; }
+    .month-style-options .report-style-selector {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+    }
+    .month-style-options .report-style-button {
+      border-width: 1px;
+      border-radius: 4px;
+    }
+    .month-export-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .month-action-buttons { justify-content: flex-end; }
+    .records-list { width: 100%; min-width: 0; gap: 0; }
+    .style-1,
+    .style-2 { padding-left: 0; padding-right: 0; }
+    .style1-content { gap: 10px; }
+    .style1-table-container { width: 100%; min-width: 0; overflow: visible; }
+    .style1-table { width: 100%; min-width: 0; table-layout: fixed; font-size: 10px; }
+    .style1-table th { padding: 7px 1px; font-size: 10px; overflow-wrap: anywhere; }
+    .style1-table td { padding: 5px 1px; font-size: 10px; }
+    .style1-table .col-rank { width: 11%; }
+    .style1-table .col-name { width: 25%; padding-left: 1px !important; padding-right: 1px !important; }
+    .style1-table .col-kill,
+    .style1-table .col-death,
+    .style1-table .col-occupy,
+    .style1-table .col-revive,
+    .style1-table .col-kd { width: 12.8%; }
+    .style1-summary { min-width: 0; gap: 8px; }
+    .style1-header h2 { margin-left: 0; margin-right: 0; }
+    .style2-table-wrapper { overflow: visible; border-radius: 0; }
+    .style2-table { table-layout: fixed; font-size: 10px; }
+    .style2-table th,
+    .style2-table td { padding: 6px 2px; font-size: 10px; }
+    .style2-table th:nth-child(1),
+    .style2-table td:nth-child(1) { width: 11%; }
+    .style2-table th:nth-child(2),
+    .style2-table td:nth-child(2) { width: 25%; text-align: center; padding-left: 2px; }
+    .style2-table th:nth-child(n + 3),
+    .style2-table td:nth-child(n + 3) { width: 12.8%; }
+    .player-cell { flex-direction: column; justify-content: center; gap: 3px; padding-left: 0; min-width: 0; }
+    .player-name-s2 { width: 100%; line-height: 1.25; text-align: center; white-space: normal; overflow-wrap: anywhere; }
+    .bar-cell { width: 100%; max-width: none; gap: 2px; }
     .style2-rankings-grid { grid-template-columns: 1fr; }
     .stat-card-row { flex-wrap: wrap; }
     .stat-card-mini { min-width: 120px; }
 }
+
+/* 样式三：样式一视觉，标题在上，排名与统计左右排列 */
+.style-3 .style1-content {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 6px;
+}
+.style-3 .style1-table-container { flex: 0 0 66%; width: 66%; min-width: 0; overflow: visible; }
+.style-3 .style1-summary { flex: 0 0 calc(34% - 6px); width: calc(34% - 6px); min-width: 0; gap: 6px; }
+.style-3 .summary-title { padding: 5px 2px; font-size: 10px; }
+.style-3 .summary-item { padding: 5px 6px; font-size: 9px; }
+.style-3 .top3-item { padding: 4px 3px; font-size: 9px; }
+.style-3 .top3-rank { width: 17px; margin-right: 2px; }
+.style-3 .rank-medal-small { font-size: 10px; }
+.style-3 .top3-info { min-width: 0; gap: 2px; }
+.style-3 .player-avatar-xs,
+.style-3 .player-avatar-placeholder-xs { width: 16px; height: 16px; flex: 0 0 16px; }
+.style-3 .top3-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.style-3 .top3-value { width: auto; min-width: 20px; font-size: 9px; }
+
+/* 样式四：样式二视觉，标题在上，排名与数据卡片左右排列 */
+.style-4 {
+    display: grid;
+    grid-template-columns: minmax(0, 66%) minmax(0, calc(34% - 6px));
+    grid-template-rows: auto auto;
+    align-items: start;
+    gap: 6px;
+}
+.style-4 .style2-header { grid-column: 1 / -1; grid-row: 1; margin-bottom: 0; }
+.style-4 .style2-table-wrapper { grid-column: 1; grid-row: 2; margin: 0; }
+.style-4 .style2-side-content { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.style-4 .style2-dashboard { margin: 0; gap: 6px; flex-direction: column; }
+.style-4 .style2-rankings-grid { margin: 0; gap: 6px; grid-template-columns: 1fr; }
+.style-4 .dashboard-stats { gap: 6px; }
+.style-4 .stat-card-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.style-4 .stat-card-mini { min-width: 0; padding: 5px 2px; border-radius: 5px; }
+.style-4 .stat-label-mini { font-size: 8px; }
+.style-4 .stat-value-mini { font-size: 11px; }
+.style-4 .dashboard-mvp { width: auto; padding: 6px; border-radius: 6px; flex-direction: column; justify-content: center; gap: 2px; }
+.style-4 .mvp-avatar,
+.style-4 .mvp-avatar-placeholder { width: 34px; height: 34px; }
+.style-4 .mvp-name { display: block; width: 100%; margin-top: 3px; font-size: 10px; line-height: 1.2; white-space: normal; overflow-wrap: anywhere; }
+.style-4 .mvp-label { margin-top: 2px; font-size: 8px; }
+.style-4 .mvp-crown { top: -5px; font-size: 14px; }
+.style-4 .rank-card-s2 { padding: 5px 3px; border-radius: 5px; }
+.style-4 .rank-card-title-s2 { margin-bottom: 5px; gap: 3px; font-size: 9px; }
+.style-4 .rank-list-s2 { gap: 4px; }
+.style-4 .rank-item-s2 { font-size: 8px; }
+.style-4 .rank-num-s2 { width: 13px; margin-right: 2px; font-size: 8px; }
+.style-4 .avatar-xxs { width: 14px; height: 14px; }
+.style-4 .style2-table th,
+.style-4 .style2-table td { padding-left: 1px; padding-right: 1px; font-size: 9px; }
 </style>

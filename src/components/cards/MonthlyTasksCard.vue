@@ -47,7 +47,7 @@
             trigger="click"
             @select="onFishMoreSelect"
           >
-            <n-button :disabled="monthLoading || fishToppingUp">▾</n-button>
+            <n-button class="compact-dropdown-trigger" :disabled="monthLoading || fishToppingUp">▾</n-button>
           </n-dropdown>
         </n-button-group>
 
@@ -64,7 +64,7 @@
             trigger="click"
             @select="onArenaMoreSelect"
           >
-            <n-button :disabled="monthLoading || arenaToppingUp || !isArenaActivityOpen">▾</n-button>
+            <n-button class="compact-dropdown-trigger" :disabled="monthLoading || arenaToppingUp || !isArenaActivityOpen">▾</n-button>
           </n-dropdown>
         </n-button-group>
       </div>
@@ -389,8 +389,38 @@ defineExpose({ fetchMonthlyActivity });
 .action-row {
   display: flex;
   gap: var(--spacing-sm);
-  .action-button {
-    flex: 1;
+  align-items: stretch;
+
+  > .action-button,
+  :deep(.n-button-group) {
+    min-width: 0;
+  }
+
+  > .action-button {
+    flex: 0 0 82px;
+    width: 82px;
+  }
+
+  :deep(.n-button-group) {
+    flex: 1 1 0;
+  }
+
+  :deep(.n-button-group) {
+    display: flex;
+  }
+
+  :deep(.n-button-group .action-button) {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    padding-inline: 4px;
+  }
+
+  :deep(.compact-dropdown-trigger) {
+    flex: 0 0 30px;
+    width: 30px;
+    min-width: 30px;
+    padding: 0 4px;
   }
 }
 
@@ -419,6 +449,18 @@ defineExpose({ fetchMonthlyActivity });
     &:hover:not(:disabled) {
       background: var(--secondary-color-hover);
     }
+  }
+}
+
+@media (max-width: 768px) {
+  .action-row {
+    gap: 5px;
+  }
+
+  .action-button {
+    padding: 7px 5px;
+    white-space: nowrap;
+    font-size: 12px;
   }
 }
 

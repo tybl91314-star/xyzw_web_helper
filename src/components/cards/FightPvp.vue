@@ -508,6 +508,7 @@
 import { ref, computed, onMounted, watch } from "vue";
 import { useMessage, NDatePicker, NPagination } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
+import { getEquipmentQuenchStats } from "@/utils/equipmentQuenchStats";
 import {
   Trophy,
   Refresh,
@@ -889,20 +890,7 @@ const getHeroInfo = (heroObj) => {
 
 //获取装备信息红数和孔数
 const getEquipment = (equipment) => {
-  let redCount = 0;
-  let holeCount = 0;
-  let equipArr = [];
-  //此处遍历4件装备
-  Object.values(equipment).forEach((equ) => {
-    //遍历每件装备的属性
-    Object.values(equ.quenches).forEach((item) => {
-      holeCount++;
-      if (item.colorId == 6) {
-        redCount++;
-      }
-    });
-  });
-  return { redCount, holeCount };
+  return getEquipmentQuenchStats(equipment);
 };
 
 // 处理分页大小改变

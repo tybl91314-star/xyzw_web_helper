@@ -120,7 +120,20 @@
           </div>
         </n-modal>
 
-        <n-tabs v-model:value="activeTab" type="line" animated>
+        <div class="club-section-nav">
+          <button
+            v-for="tab in clubFeatureTabs"
+            :key="tab.value"
+            type="button"
+            class="club-section-button"
+            :class="{ active: activeTab === tab.value }"
+            @click="activeTab = tab.value"
+          >
+            {{ tab.label }}
+          </button>
+        </div>
+
+        <n-tabs v-model:value="activeTab" type="line" animated class="club-feature-tabs">
           <n-tab-pane name="overview" tab="概览" display-directive="show:lazy">
             <div class="overview">
               <n-grid x-gap="12" y-gap="12" cols="2" item-responsive>
@@ -285,11 +298,19 @@
           </n-tab-pane>
 
           <n-tab-pane
-            name="history"
-            tab="俱乐部历史战绩"
+            name="racing"
+            tab="疯狂赛车"
             display-directive="show:lazy"
           >
-            <ClubHistoryRecords inline />
+            <ClubCarKing />
+          </n-tab-pane>
+
+          <n-tab-pane
+            name="carsocre"
+            tab="赛车积分信息"
+            display-directive="show:lazy"
+          >
+            <CarScoreInfo inline />
           </n-tab-pane>
 
           <n-tab-pane
@@ -301,11 +322,11 @@
           </n-tab-pane>
 
           <n-tab-pane
-            name="carsocre"
-            tab="赛车积分信息"
+            name="history"
+            tab="俱乐部历史战绩"
             display-directive="show:lazy"
           >
-            <CarScoreInfo inline />
+            <ClubHistoryRecords inline />
           </n-tab-pane>
         </n-tabs>
       </div>
@@ -595,10 +616,12 @@
 import { ref, computed, onMounted, onUnmounted, h, reactive, watch, nextTick } from "vue";
 import { useMessage, useDialog, NDataTable, NModal, NAvatar, NTag, NDescriptions, NDescriptionsItem, NButton, NSpace, NIcon, NGrid, NGi, NStatistic, NThing, NAlert, NCollapse, NCollapseItem, NCard } from "naive-ui";
 import { useTokenStore } from "@/stores/tokenStore";
+import { getEquipmentQuenchStats } from "@/utils/equipmentQuenchStats";
 import { Copy, Refresh, People, BarChart, Flame, Skull, Megaphone, Person, ShieldCheckmark } from "@vicons/ionicons5";
 import ClubHistoryRecords from "./ClubHistoryRecords.vue";
 import ClubWeirdTowerInfo from "./ClubWeirdTowerInfo.vue";
 import CarScoreInfo from "./CarScoreInfo.vue";
+import ClubCarKing from "../ClubCarKing.vue";
 import { $emit } from "@/stores/events";
 import { HERO_DICT, legacycolor, HeroFillInfo, getLineupType, LINEUP_RULES } from "@/utils/HeroList";
 import html2canvas from 'html2canvas';
@@ -607,6 +630,14 @@ import { downloadCanvasAsImage } from "@/utils/imageExport";
 const tokenStore = useTokenStore();
 const message = useMessage();
 const dialog = useDialog();
+const clubFeatureTabs = [
+  { value: "overview", label: "概览" },
+  { value: "members", label: "成员" },
+  { value: "racing", label: "疯狂赛车" },
+  { value: "carsocre", label: "赛车积分" },
+  { value: "weirdtower", label: "怪异塔信息" },
+  { value: "history", label: "历史战绩" },
+];
 
 const info = computed(() => tokenStore.gameData?.legionInfo || null);
 const club = computed(() => info.value?.info || null);
@@ -726,19 +757,7 @@ const getHeroInfo = (heroObj) => {
 
 // 获取装备信息红数和孔数
 const getEquipment = (equipment) => {
-  let redCount = 0;
-  let holeCount = 0;
-  //遍历4件装备
-  Object.values(equipment).forEach((equ) => {
-    //遍历每件装备的属性
-    Object.values(equ.quenches).forEach((item) => {
-      holeCount++;
-      if (item.colorId == 6) {
-        redCount++;
-      }
-    });
-  });
-  return { redCount, holeCount };
+  return getEquipmentQuenchStats(equipment);
 };
 
 const selectHeroInfo = (heroInfo) => {
@@ -1690,6 +1709,41 @@ const formatNumber = (num) => {
   .empty-club .actions {
     margin-top: var(--spacing-sm);
   }
+}
+
+.club-feature-tabs :deep(.n-tabs-nav) {
+  display: none !important;
+}
+
+.club-section-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 8px;
+  background: var(--bg-primary, #fff);
+}
+
+.club-section-button {
+  min-width: 0;
+  min-height: 40px;
+  padding: 7px 4px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 7px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-secondary, #4b5563);
+  font-size: 12px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.club-section-button.active {
+  border-color: var(--primary-color, #18a058);
+  background: color-mix(in srgb, var(--primary-color, #18a058) 14%, white);
+  color: var(--primary-color, #18a058);
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--primary-color, #18a058);
 }
 
 .status-icon {

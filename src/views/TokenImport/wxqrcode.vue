@@ -108,6 +108,7 @@ import { getTokenId, transformToken, getServerList } from "@/utils/token";
 import useIndexedDB from "@/hooks/useIndexedDB";
 import { g_utils } from "@/utils/bonProtocol";
 import { useTokenStore } from "@/stores/tokenStore";
+import { requestLoginText } from "@/utils/nativeHttp";
 const tokenStore = useTokenStore();
 const { storeArrayBuffer } = useIndexedDB();
 
@@ -291,25 +292,19 @@ const tryGetWeixinQR = async () => {
       "&scope=snsapi_base,snsapi_userinfo,snsapi_friend,snsapi_message" +
       "&state=weixin";
 
-    const response = await new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", qrPageUrl, true);
-      xhr.timeout = 15000;
-      xhr.setRequestHeader("Accept", "text/html");
-      xhr.onload = () => resolve(xhr);
-      xhr.onerror = () => reject(new Error("网络错误"));
-      xhr.ontimeout = () => reject(new Error("请求超时"));
-      xhr.send();
+    const response = await requestLoginText(qrPageUrl, {
+      timeout: 15000,
+      accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     });
 
     if (response.status !== 200) {
       throw new Error("HTTP 状态码：" + response.status);
     }
 
-    const html = response.responseText;
+    const html = response.data;
     const doc = new DOMParser().parseFromString(html, "text/html");
 
-    let qrUrl = doc.querySelector("img.auth_qrcode")?.src;
+    let qrUrl = doc.querySelector("img.auth_qrcode")?.getAttribute("src") || "";
 
     if (!qrUrl) {
       const m = html.match(/https:\/\/[^"']*qrcode[^"']*/i);
@@ -319,6 +314,8 @@ const tryGetWeixinQR = async () => {
     if (!qrUrl) {
       throw new Error("未找到二维码图片地址");
     }
+
+    qrUrl = new URL(qrUrl, "https://open.weixin.qq.com").toString();
 
     // 解析 uuid
     qrcodeUUID.value = qrUrl.split("/").pop().split("?")[0];
@@ -368,24 +365,15 @@ const checkScanStatus = async () => {
 
     // 使用微信官方推荐的扫码状态轮询路径
     const url =
-      "/api/weixin/connect/l/qrconnect?uuid=" +
+      "/api/weixin-long/connect/l/qrconnect?uuid=" +
       qrcodeUUID.value +
       "&f=url&_=" +
       Date.now();
 
-    const res = await new Promise((resolve) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open("GET", url, true);
-      xhr.timeout = 5000;
-      xhr.setRequestHeader("Accept", "*/*");
-      xhr.onload = () => resolve(xhr);
-      xhr.onerror = () => resolve({ status: 0 });
-      xhr.ontimeout = () => resolve({ status: 0 });
-      xhr.send();
-    });
+    const res = await requestLoginText(url, { timeout: 5000, accept: "*/*" });
 
     if (res.status === 200) {
-      const text = res.responseText;
+      const text = res.data;
 
       // 405 → 扫码确认
       if (text.includes("window.wx_errcode=405")) {
@@ -504,23 +492,19 @@ const getEncryptedData = async (code) => {
     "&deviceUniqueId=DID-0e782e88-2f3b-4f5b-9020-47f5e5a5a026" +
     "&packageName=com.hortorgames.xyzw";
 
-  const res = await new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", loginUrl, true);
-    xhr.timeout = 15000;
-    xhr.setRequestHeader("Accept", "*/*");
-    xhr.setRequestHeader("Content-Type", "text/plain; charset=utf-8");
-    xhr.onload = () => resolve(xhr);
-    xhr.onerror = () => reject(new Error("登录失败"));
-    xhr.ontimeout = () => reject(new Error("登录超时"));
-    xhr.send(encoded);
+  const res = await requestLoginText(loginUrl, {
+    method: "POST",
+    body: encoded,
+    timeout: 15000,
+    accept: "*/*",
+    contentType: "text/plain; charset=utf-8",
   });
 
   if (res.status !== 200) {
     throw new Error("HTTP 状态码：" + res.status);
   }
 
-  const json = JSON.parse(res.responseText);
+  const json = JSON.parse(res.data);
   if (json.meta?.errCode !== 0) {
     throw new Error("登录失败：" + json.meta?.errMsg);
   }

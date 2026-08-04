@@ -8,6 +8,7 @@
  * @returns {string} 格式化的日期字符串 YYYY/MM/DD
  */
 import * as XLSX from "xlsx";
+import { saveBlobAsFile } from "@/utils/fileExport";
 
 export function getLastSaturday() {
   const today = new Date();
@@ -336,7 +337,7 @@ export function parseAttackType(attackType) {
  * @param {string} queryDate - 查询日期
  * @returns {string} 格式化的文本
  */
-export function formatBattleRecordsForExport(roleDetailsList, queryDate) {
+export async function formatBattleRecordsForExport(roleDetailsList, queryDate) {
   if (!roleDetailsList || roleDetailsList.length === 0) {
     return "暂无战绩数据";
   }
@@ -360,7 +361,7 @@ export function formatBattleRecordsForExport(roleDetailsList, queryDate) {
 
   sortedMembers.forEach((member, index) => {
     const { name, winCnt, loseCnt, buildingCnt } = member;
-    const Resurrection = Math.max(loseCnt - 6, 0);
+    const Resurrection = member.reviveCnt ?? Math.max(loseCnt - 6, 0);
     totalKills += winCnt || 0;
     totalDeaths += loseCnt || 0;
     totalSieges += buildingCnt || 0;
@@ -392,7 +393,7 @@ export function formatBattleRecordsForExport(roleDetailsList, queryDate) {
         member.loseCnt || 0,
         member.buildingCnt || 0,
         (member.winCnt / member.loseCnt).toFixed(2),
-        Math.max(member.loseCnt - 6, 0),
+        member.reviveCnt ?? Math.max(member.loseCnt - 6, 0),
       ]),
   ];
 
@@ -470,7 +471,7 @@ export function formatBattleRecordsForExport(roleDetailsList, queryDate) {
         roleDetailsList.reduce((sum, m) => sum + (m.loseCnt || 0), 0),
         roleDetailsList.reduce((sum, m) => sum + (m.buildingCnt || 0), 0),
         roleDetailsList.reduce(
-          (sum, m) => sum + (Math.max(m.loseCnt - 6, 0) || 0),
+          (sum, m) => sum + ((m.reviveCnt ?? Math.max(m.loseCnt - 6, 0)) || 0),
           0,
         ),
       ],
@@ -504,8 +505,17 @@ export function formatBattleRecordsForExport(roleDetailsList, queryDate) {
   // 生成文件名
   const fileName = `俱乐部战绩_${queryDate.replace(/\//g, "-")}.xlsx`;
 
-  // 触发下载
-  XLSX.writeFile(workbook, fileName);
+  const workbookBytes = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
+  await saveBlobAsFile(
+    new Blob([workbookBytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    }),
+    fileName,
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  );
   return lines.join("\n");
 }
 /**

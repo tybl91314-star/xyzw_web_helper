@@ -148,14 +148,14 @@ const columns = computed(() => {
     {
       title: '序号',
       key: 'index',
-      width: 60,
+      width: 42,
       align: 'center',
       render: (_, index) => index + 1
     },
     {
       title: '头像',
       key: 'headImg',
-      width: 60,
+      width: 48,
       align: 'center',
       render: (row) => {
         if (row.headImg) {
@@ -189,6 +189,7 @@ const columns = computed(() => {
     {
       title: '成员',
       key: 'name',
+      width: 138,
       align: 'left',
       render: (row) => {
         return h(
@@ -219,6 +220,7 @@ const columns = computed(() => {
     {
       title: '赛车积分',
       key: 'score',
+      width: 86,
       align: 'center',
       render: (row) => row.score || '0'
     }

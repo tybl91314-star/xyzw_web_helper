@@ -20,7 +20,7 @@ async function safeImport(moduleName, humanName) {
   }
 }
 
-export default defineConfig(async () => {
+export default defineConfig(async ({ command }) => {
   let basicSsl;
   try {
     ({ default: basicSsl } = await import("@vitejs/plugin-basic-ssl"));
@@ -77,6 +77,7 @@ export default defineConfig(async () => {
   const { ArcoResolver } = componentsResolversModule ?? {};
   const componentsPlugin = componentsModule?.default?.({
     dirs: ["src/components"],
+    dts: command === "serve" ? "components.d.ts" : false,
     resolvers: ArcoResolver
       ? [
           ArcoResolver({

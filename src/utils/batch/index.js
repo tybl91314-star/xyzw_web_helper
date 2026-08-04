@@ -6,6 +6,7 @@ export * from './cronUtils.js';
 
 // Connection manager
 export * from './connectionManager.js';
+export * from './activityAvailability.js';
 
 // Log utilities
 export * from './logUtils.js';

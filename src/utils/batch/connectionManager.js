@@ -2,6 +2,13 @@
  * WebSocket连接管理器
  */
 
+import {
+  isArenaActivityOpenAt,
+  isCarActivityOpenAt,
+  isDreamActivityOpenAt,
+  isVaultActivityOpenAt,
+} from "./activityAvailability.js";
+
 // 全局连接队列控制 - 限制并发连接数
 export const connectionQueue = { active: 0 };
 
@@ -177,8 +184,6 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
  */
 export const getActivityStatus = () => {
   const now = new Date();
-  const day = now.getDay();
-  const hour = now.getHours();
 
   // 计算当前活动周
   const start = new Date("2025-12-12T12:00:00"); // 起始时间：黑市周开始
@@ -200,14 +205,14 @@ export const getActivityStatus = () => {
   }
 
   return {
-    // 车活动开放 (周一到周三)
-    isCarActivityOpen: day >= 1 && day <= 3,
+    // 车活动开放 (周一到周三 06:00-20:00)
+    isCarActivityOpen: isCarActivityOpenAt(now),
     // 梦境活动开放 (周日、周一、周三、周四)
-    ismengjingActivityOpen: day === 0 || day === 1 || day === 3 || day === 4,
+    ismengjingActivityOpen: isDreamActivityOpenAt(now),
     // 宝库活动开放 (非周一、周二)
-    isbaokuActivityOpen: day !== 1 && day !== 2,
+    isbaokuActivityOpen: isVaultActivityOpenAt(now),
     // 竞技场活动开放 (6点到22点)
-    isarenaActivityOpen: hour >= 6 && hour < 22,
+    isarenaActivityOpen: isArenaActivityOpenAt(now),
     // 当前活动周
     currentActivityWeek,
     // 怪异塔活动开放 (黑市周)

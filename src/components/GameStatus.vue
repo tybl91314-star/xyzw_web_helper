@@ -152,9 +152,8 @@
       </div>
     </div>
 
-    <!-- 俱乐部信息与疯狂赛车（同级卡片，仅俱乐部分区） -->
+    <!-- 俱乐部信息（疯狂赛车已收进俱乐部页签） -->
     <ClubInfo v-if="activeSection === 'club'" />
-    <ClubCarKing v-if="activeSection === 'club'" />
 
     <!-- 月度任务进度（提取组件） -->
     <MonthlyTasksCard v-show="activeSection === 'activity'" />
@@ -167,27 +166,17 @@
 
     <!-- 盐场分组（包含盐场、周战绩、月战绩） -->
     <div class="salt-field-group" v-if="activeSection === 'saltFieldGroup'">
-      <div
-        class="sub-nav"
-        style="
-          padding: 8px;
-          background: var(--n-color);
-          display: flex;
-          justify-content: center;
-        "
-      >
-        <n-tabs
-          type="segment"
-          animated
-          v-model:value="saltFieldSubTab"
-          size="small"
+      <div class="sub-nav mobile-section-nav salt-section-nav">
+        <button
+          v-for="tab in saltFieldTabs"
+          :key="tab.value"
+          type="button"
+          class="sub-nav-button"
+          :class="{ active: saltFieldSubTab === tab.value }"
+          @click="saltFieldSubTab = tab.value"
         >
-          <n-tab-pane name="warrank" tab="盐场" />
-          <n-tab-pane name="weekBattle" tab="本周盐场战绩" />
-          <n-tab-pane name="monthBattle" tab="本月盐场战绩" />
-          <n-tab-pane name="legionWarMap" tab="盐场地图" />
-          <n-tab-pane name="legionWarStatistics" tab="盐场战况" />
-        </n-tabs>
+          {{ tab.label }}
+        </button>
       </div>
 
       <div
@@ -258,22 +247,17 @@
 
     <!-- 排行榜分组 -->
     <div class="rank-group" v-if="activeSection === 'rankGroup'">
-      <div
-        class="sub-nav"
-        style="
-          padding: 8px;
-          background: var(--n-color);
-          display: flex;
-          justify-content: center;
-        "
-      >
-        <n-tabs type="segment" animated v-model:value="rankSubTab" size="small">
-          <n-tab-pane name="serverrank" tab="区服榜" />
-          <n-tab-pane name="toprank" tab="巅峰榜" />
-          <n-tab-pane name="topclubrank" tab="俱乐部榜" />
-          <n-tab-pane name="goldclubrank" tab="黄金积分榜" />
-          <n-tab-pane name="greatRouteRank" tab="伟大航路积分榜" />
-        </n-tabs>
+      <div class="sub-nav mobile-section-nav rank-section-nav">
+        <button
+          v-for="tab in rankTabs"
+          :key="tab.value"
+          type="button"
+          class="sub-nav-button"
+          :class="{ active: rankSubTab === tab.value }"
+          @click="rankSubTab = tab.value"
+        >
+          {{ tab.label }}
+        </button>
       </div>
 
       <div class="warrank-full-container" v-if="rankSubTab === 'serverrank'">
@@ -368,6 +352,20 @@ const gameSections = new Set([
 const normalizeSection = (section) =>
   gameSections.has(String(section)) ? String(section) : "daily";
 const activeSection = ref(normalizeSection(route.query.section));
+const saltFieldTabs = [
+  { value: "warrank", label: "盐场" },
+  { value: "weekBattle", label: "本周战绩" },
+  { value: "monthBattle", label: "本月战绩" },
+  { value: "legionWarMap", label: "盐场地图" },
+  { value: "legionWarStatistics", label: "盐场战况" },
+];
+const rankTabs = [
+  { value: "serverrank", label: "区服榜" },
+  { value: "toprank", label: "巅峰榜" },
+  { value: "topclubrank", label: "俱乐部榜" },
+  { value: "goldclubrank", label: "黄金积分榜" },
+  { value: "greatRouteRank", label: "伟大航路榜" },
+];
 const saltFieldSubTab = ref("warrank");
 const peachSubTab = ref("peach");
 const rankSubTab = ref("serverrank");
@@ -937,6 +935,36 @@ onUnmounted(() => {
   }
 }
 
+.mobile-section-nav {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  background: var(--n-color, #fff);
+}
+
+.sub-nav-button {
+  min-width: 0;
+  padding: 8px 6px;
+  border: 1px solid var(--border-color, #e5e7eb);
+  border-radius: 7px;
+  background: var(--bg-primary, #fff);
+  color: var(--text-secondary, #4b5563);
+  font-size: 13px;
+  line-height: 1.3;
+  white-space: normal;
+  cursor: pointer;
+}
+
+.sub-nav-button.active {
+  border-color: var(--primary-color, #18a058);
+  background: color-mix(in srgb, var(--primary-color, #18a058) 14%, white);
+  color: var(--primary-color, #18a058);
+  font-weight: 700;
+  box-shadow: inset 0 -3px 0 var(--primary-color, #18a058);
+}
+
 .loading-text {
   display: flex;
   align-items: center;
@@ -986,10 +1014,29 @@ onUnmounted(() => {
 
   .sub-nav {
     max-width: 100%;
-    justify-content: flex-start !important;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible;
+  }
+
+  .mobile-section-nav {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 7px;
+  }
+
+  .sub-nav-button {
+    min-height: 42px;
+    font-size: 12px;
+  }
+
+  .salt-field-group > .warrank-full-container {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
+  }
+
+  .peach-group > .warrank-full-container {
+    height: auto;
+    min-height: 0;
+    overflow: visible;
   }
 
   :deep(.status-card),

@@ -188,23 +188,33 @@ const columns = computed(() => {
         {
           title: "比赛日期",
           key: "warDate",
+          width: 118,
           align: "center",
+          render: (row) => h("span", { style: { whiteSpace: "nowrap" } }, row.warDate),
         },
         {
           title: "名次",
           key: "rank",
           align: "center",
           render: (row) => {
+            const rank = Number(row.rank);
+            if (!Number.isFinite(rank) || rank <= 0) {
+              return h(
+                NTag,
+                { type: "default", bordered: false, size: "small" },
+                { default: () => "无" },
+              );
+            }
             let color = "default";
-            if (row.rank === 1) color = "warning"; // 金色/冠军
-            else if (row.rank === 2) color = "info"; // 银色/亚军
-            else if (row.rank === 3) color = "success"; // 铜色/季军
-            else if (row.rank > 20) color = "error"; // 排名靠后
+            if (rank === 1) color = "warning"; // 金色/冠军
+            else if (rank === 2) color = "info"; // 银色/亚军
+            else if (rank === 3) color = "success"; // 铜色/季军
+            else if (rank > 20) color = "error"; // 排名靠后
             
             return h(
               NTag,
               { type: color, bordered: false, size: "small" },
-              { default: () => `第 ${row.rank} 名` }
+              { default: () => `第 ${rank} 名` }
             );
           },
         },

@@ -397,6 +397,7 @@
 
 <script setup>
 import { ref, onMounted, computed, h, reactive } from "vue";
+import { getEquipmentQuenchStats } from "@/utils/equipmentQuenchStats";
 import {
   useMessage,
   NDataTable,
@@ -573,19 +574,7 @@ const selectHeroInfo = (heroInfo) => {
 
 // 获取装备信息红数和孔数
 const getEquipment = (equipment) => {
-  let redCount = 0;
-  let holeCount = 0;
-  //遍历4件装备
-  Object.values(equipment).forEach((equ) => {
-    //遍历每件装备的属性
-    Object.values(equ.quenches).forEach((item) => {
-      holeCount++;
-      if (item.colorId == 6) {
-        redCount++;
-      }
-    });
-  });
-  return { redCount, holeCount };
+  return getEquipmentQuenchStats(equipment);
 };
 
 // 提取英雄信息
