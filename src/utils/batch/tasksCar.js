@@ -417,6 +417,134 @@ export function createTasksCar(deps) {
   };
 
   /**
+   * 直接发车：不刷新、不判断品质；需要护卫时优先配置，无可用护卫则直接发车。
+   */
+  const batchDirectSendCar = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始直接发车: ${token.name} ===`,
+          type: "info",
+        });
+        await ensureConnection(tokenId);
+
+        const [carRes, roleRes, usageRes, legionRes] = await Promise.all([
+          tokenStore.sendMessageWithPromise(tokenId, "car_getrolecar", {}, 10000),
+          tokenStore
+            .sendMessageWithPromise(tokenId, "role_getroleinfo", {}, 10000)
+            .catch(() => ({})),
+          tokenStore
+            .sendMessageWithPromise(tokenId, "car_getmemberhelpingcnt", {}, 5000)
+            .catch(() => ({})),
+          tokenStore
+            .sendMessageWithPromise(tokenId, "legion_getinfo", {}, 5000)
+            .catch(() => ({})),
+        ]);
+
+        const carList = normalizeCars(carRes?.body ?? carRes);
+        const currentRoleId = String(
+          roleRes?.role?.roleId || roleRes?.body?.role?.roleId || "",
+        );
+        const helperUsageMap = {
+          ...(usageRes?.body?.memberHelpingCntMap ||
+            usageRes?.memberHelpingCntMap ||
+            {}),
+        };
+        const membersMap =
+          legionRes?.body?.info?.members || legionRes?.info?.members || {};
+        const helpers = Object.values(membersMap)
+          .filter((member) => String(member?.roleId || "") !== currentRoleId)
+          .map((member) => ({
+            id: String(member.roleId),
+            name: member.name || member.nickname || String(member.roleId),
+            redQuench: Number(member.custom?.red_quench_cnt || 0),
+          }))
+          .sort((left, right) => right.redQuench - left.redQuench);
+
+        let sentCount = 0;
+        let sentWithoutGuardCount = 0;
+        for (const car of carList) {
+          if (shouldStop.value) break;
+          if (Number(car.sendAt || 0) !== 0) continue;
+
+          let helperId = car.helperId ? String(car.helperId) : "";
+          if (Number(car.color || 0) >= 5 && !helperId) {
+            const helper = helpers.find(
+              (item) => Number(helperUsageMap[item.id] || 0) < 4,
+            );
+            if (!helper) {
+              sentWithoutGuardCount += 1;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 车辆[${gradeLabel(car.color)}]需要护卫但暂无可用护卫，将不带护卫发车`,
+                type: "warning",
+              });
+            } else {
+              helperId = helper.id;
+              helperUsageMap[helper.id] =
+                Number(helperUsageMap[helper.id] || 0) + 1;
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 车辆[${gradeLabel(car.color)}]已配置护卫 ${helper.name}`,
+                type: "success",
+              });
+            }
+          }
+
+          await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "car_send",
+            {
+              carId: String(car.id),
+              helperId: helperId || 0,
+              text: "",
+              isUpgrade: false,
+            },
+            10000,
+          );
+          sentCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== ${token.name} 直接发车完成：已发 ${sentCount} 辆${sentWithoutGuardCount ? `，其中 ${sentWithoutGuardCount} 辆未找到护卫` : ""} ===`,
+          type: sentWithoutGuardCount ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token?.name || tokenId} 直接发车失败: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量直接发车结束");
+  };
+
+  /**
    * 一键收车
    */
   const batchClaimCars = async () => {
@@ -597,6 +725,7 @@ export function createTasksCar(deps) {
 
   return {
     batchSmartSendCar,
+    batchDirectSendCar,
     batchClaimCars,
   };
 }

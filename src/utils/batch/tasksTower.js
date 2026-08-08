@@ -31,6 +31,49 @@ export function createTasksTower(deps) {
     weirdTowerMaxClimb,
   } = deps;
 
+  const getMergeBox = (response) =>
+    response?.mergeBox || response?.body?.mergeBox || null;
+
+  const wait = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  const serializeDiagnostic = (value) => {
+    const seen = new WeakSet();
+    const redactKey = /token|password|secret|ticket|session|openid|auth/i;
+    const normalize = (current, depth = 0) => {
+      if (current === null || typeof current !== "object") return current;
+      if (depth >= 8) return "[层级过深]";
+      if (seen.has(current)) return "[循环引用]";
+      seen.add(current);
+      if (Array.isArray(current)) {
+        const items = current.slice(0, 50).map((item) => normalize(item, depth + 1));
+        if (current.length > 50) items.push(`[其余 ${current.length - 50} 项已省略]`);
+        return items;
+      }
+      return Object.fromEntries(
+        Object.entries(current).map(([key, item]) => [
+          key,
+          redactKey.test(key) ? "[已隐藏]" : normalize(item, depth + 1),
+        ]),
+      );
+    };
+    const json = JSON.stringify(normalize(value));
+    return json.length > 16000 ? `${json.slice(0, 16000)}...[内容过长已截断]` : json;
+  };
+
+  const addDiagnosticLogs = (tokenName, label, value) => {
+    const text = serializeDiagnostic(value);
+    const chunkSize = 700;
+    const total = Math.max(1, Math.ceil(text.length / chunkSize));
+    for (let index = 0; index < total; index += 1) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 诊断[${label} ${index + 1}/${total}] ${text.slice(index * chunkSize, (index + 1) * chunkSize)}`,
+        type: "info",
+      });
+    }
+  };
+
   /**
    * 爬塔
    */
@@ -548,7 +591,8 @@ export function createTasksTower(deps) {
   };
 
   /**
-   * 领取怪异塔免费道具
+   * 换皮闯关协议诊断。
+   * 仅调用只读信息接口，不执行领取、购买、发射或其他资源操作。
    */
   const batchClaimFreeEnergy = async () => {
     if (selectedTokens.value.length === 0) return;
@@ -567,40 +611,39 @@ export function createTasksTower(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始领取怪异塔免费道具: ${token.name} ===`,
+          message: `=== 开始换皮闯关协议诊断: ${token.name}（只读，不领取或消耗） ===`,
           type: "info",
         });
 
         await ensureConnection(tokenId);
 
-        const freeEnergyResult = await tokenStore.sendMessageWithPromise(
+        const requestedActId = getTowerActId();
+        const towerResult = await tokenStore.sendMessageWithPromise(
           tokenId,
-          "mergebox_getinfo",
-          {
-            actType: 1,
-          },
-          5000,
+          "towers_getinfo",
+          { actId: requestedActId },
+          10000,
         );
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} towers_getinfo 请求活动编号: ${requestedActId}`,
+          type: "info",
+        });
+        addDiagnosticLogs(token.name, "towers_getinfo", towerResult);
 
-        if (freeEnergyResult && freeEnergyResult.mergeBox.freeEnergy > 0) {
-          await tokenStore.sendMessageWithPromise(
+        try {
+          const activityResult = await tokenStore.sendMessageWithPromise(
             tokenId,
-            "mergebox_claimfreeenergy",
-            {
-              actType: 1,
-            },
-            5000,
+            "activity_get",
+            {},
+            10000,
           );
+          addDiagnosticLogs(token.name, "activity_get", activityResult);
+        } catch (activityError) {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} 成功领取免费道具${freeEnergyResult.mergeBox.freeEnergy}个`,
-            type: "success",
-          });
-        } else {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `===  ${token.name} 暂无免费道具可领取`,
-            type: "success",
+            message: `=== ${token.name} activity_get 诊断读取失败: ${activityError.message || "未知错误"} ===`,
+            type: "warning",
           });
         }
 
@@ -610,7 +653,7 @@ export function createTasksTower(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 领取免费道具失败: ${error.message || "未知错误"}`,
+          message: `=== ${token.name} 换皮闯关协议诊断失败: ${error.message || "未知错误"}`,
           type: "error",
         });
       } finally {
@@ -628,7 +671,7 @@ export function createTasksTower(deps) {
 
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量领取怪异塔免费道具结束");
+    message.success("换皮闯关协议诊断结束，请复制执行日志");
   };
 
   /**
@@ -752,16 +795,6 @@ export function createTasksTower(deps) {
              });
         }
 
-        if (targetTowers.length === 0) {
-             tokenStatus.value[tokenId] = "completed";
-             addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `=== ${token.name} 换皮闯关结束 (无需挑战) ===`,
-                type: "success",
-             });
-             return;
-        }
-
         for (const type of targetTowers) {
             if (shouldStop.value) break;
 
@@ -837,44 +870,66 @@ export function createTasksTower(deps) {
             }
         }
 
-        // 闯关结束后循环领取奖励
+        // 恢复 1.4.1 的完整顺序：先结算闯关活动奖励，再领取免费道具，
+        // 最后复用当前活动连接发射。缺少结算步骤会被服务器以 2100010 拒绝。
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 闯关结束，开始领取奖励`,
+          message: `${token.name} 闯关结束，开始结算活动奖励`,
           type: "info",
         });
-        let claimCount = 0;
-        for (const { actId: id } of actIdList) {
-          const claimActId = id % 10 === 1 ? id + 1 : id;
-          try {
-            while (!shouldStop.value) {
-              await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "activity_startactegame",
-                { actId: claimActId },
-                5000,
-              );
-              claimCount++;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} 活动 ${claimActId} 领取奖励第 ${claimCount} 次`,
-                type: "success",
-              });
-              await new Promise((r) => setTimeout(r, 300));
-            }
-          } catch (e) {
+        let rewardClaimCount = 0;
+        const baseActId = Number(towerData?.actId || getTowerActId());
+        const rewardActId = baseActId % 10 === 1 ? baseActId + 1 : baseActId;
+        try {
+          while (!shouldStop.value) {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_startactegame",
+              { actId: rewardActId },
+              5000,
+            );
+            rewardClaimCount += 1;
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 活动 ${claimActId} 领取结束（共 ${claimCount} 次）`,
-              type: claimCount > 0 ? "success" : "info",
+              message: `${token.name} 活动 ${rewardActId} 领取奖励第 ${rewardClaimCount} 次`,
+              type: "success",
             });
+            await wait(300);
           }
-        }
-        if (claimCount > 0) {
+        } catch {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} 领取奖励 ${claimCount} 次`,
-            type: "success",
+            message: `${token.name} 活动 ${rewardActId} 奖励结算完成（共 ${rewardClaimCount} 次）`,
+            type: "info",
+          });
+        }
+
+        try {
+          const freeInfo = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mergebox_getinfo",
+            { actType: 1 },
+            5000,
+          );
+          const freeEnergy = Number(getMergeBox(freeInfo)?.freeEnergy || 0);
+          if (freeEnergy > 0) {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "mergebox_claimfreeenergy",
+              { actType: 1 },
+              5000,
+            );
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 已领取免费发射道具 ${freeEnergy} 个`,
+              type: "success",
+            });
+          }
+        } catch (freeError) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 免费道具暂不可领，继续发射现有道具`,
+            type: "info",
           });
         }
 

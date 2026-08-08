@@ -1,6 +1,10 @@
 import { HERO_DICT } from "@/utils/HeroList";
 import { PEACH_TASKS } from "@/utils/PeachTaskIds";
-import { claimMailAndMarkRead } from "@/utils/batch/mailUtils";
+import {
+  claimMailAndMarkRead,
+  deleteOldReadMails,
+} from "@/utils/batch/mailUtils";
+import { upgradeStarUntilBlocked } from "@/utils/batch/starUpgrade";
 
 /**
  * 开箱、钓鱼、招募类任务
@@ -70,33 +74,41 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
+        let abortRemainingHeroes = false;
         for (const heroId of heroIds) {
           if (shouldStop.value) break;
 
-          // 每个英雄尝试最多10次升星（只要成功就继续，失败则跳过该英雄）
-          for (let i = 1; i <= 10; i++) {
-            if (shouldStop.value) break;
-
-            try {
-              await tokenStore.sendMessageWithPromise(
+          const result = await upgradeStarUntilBlocked({
+            shouldStop: () => shouldStop.value,
+            sendUpgrade: () =>
+              tokenStore.sendMessageWithPromise(
                 tokenId,
                 "hero_heroupgradestar",
                 { heroId },
                 5000,
-              );
-              // sendMessageWithPromise 已会在服务端 code 非 0 时 reject。
-              // 升星成功响应是角色同步数据，本身不含 code/success/result，
-              // 因此 Promise 正常返回就表示成功，应继续尝试下一颗星。
+              ),
+            onSuccess: (count) =>
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 英雄ID:${heroId} 升星成功 (第${i}次)`,
+                message: `${token.name} 英雄ID:${heroId} 升星成功 (第${count}次)`,
                 type: "success",
-              });
-            } catch (err) {
-              // 失败则停止当前英雄的升星尝试
-              break;
-            }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+              }),
+            waitAfterSuccess: () =>
+              new Promise((resolve) =>
+                setTimeout(resolve, delayConfig.action),
+              ),
+          });
+
+          if (result.abortAccount) {
+            abortRemainingHeroes = true;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 升星遇到限流或连接异常，已停止该账号后续升星：${result.error?.message || result.error}`,
+              type: "warning",
+            });
+          }
+          if (abortRemainingHeroes) {
+            break;
           }
         }
 
@@ -154,30 +166,41 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
+        let abortRemainingHeroes = false;
         for (const heroId of heroIds) {
           if (shouldStop.value) break;
 
-          // 每个英雄尝试最多10次图鉴升星（只要成功就继续，失败则跳过该英雄）
-          for (let i = 1; i <= 10; i++) {
-            if (shouldStop.value) break;
-
-            try {
-              await tokenStore.sendMessageWithPromise(
+          const result = await upgradeStarUntilBlocked({
+            shouldStop: () => shouldStop.value,
+            sendUpgrade: () =>
+              tokenStore.sendMessageWithPromise(
                 tokenId,
                 "book_upgrade",
                 { heroId },
                 5000,
-              );
+              ),
+            onSuccess: (count) =>
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 英雄ID:${heroId} 图鉴升星成功 (第${i}次)`,
+                message: `${token.name} 英雄ID:${heroId} 图鉴升星成功 (第${count}次)`,
                 type: "success",
-              });
-            } catch (err) {
-              // 失败则停止当前英雄的图鉴升星尝试
-              break;
-            }
-            await new Promise((r) => setTimeout(r, delayConfig.action));
+              }),
+            waitAfterSuccess: () =>
+              new Promise((resolve) =>
+                setTimeout(resolve, delayConfig.action),
+              ),
+          });
+
+          if (result.abortAccount) {
+            abortRemainingHeroes = true;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 图鉴升星遇到限流或连接异常，已停止该账号后续升星：${result.error?.message || result.error}`,
+              type: "warning",
+            });
+          }
+          if (abortRemainingHeroes) {
+            break;
           }
         }
 
@@ -341,6 +364,61 @@ export function createTasksItem(deps) {
     isRunning.value = false;
     currentRunningTokenId.value = null;
     message.success("领取邮件并已读执行结束");
+  };
+
+  /** 删除已读一周以上的邮件；未领取附件的邮件由 mailUtils 强制保护。 */
+  const batchDeleteReadMails = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+
+      try {
+        await ensureConnection(tokenId);
+        const result = await deleteOldReadMails((cmd, params) =>
+          tokenStore.sendMessageWithPromise(tokenId, cmd, params, 5000),
+        );
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message:
+            `${token?.name || tokenId} 邮件删除完成：符合条件 ${result.eligibleCount} 封，确认删除 ${result.deletedCount} 封` +
+            (result.failedCount
+              ? `，请求失败 ${result.failedCount} 封`
+              : "") +
+            (result.protectedAttachmentCount
+              ? `，保护 ${result.protectedAttachmentCount} 封未领取附件邮件`
+              : "") +
+            (result.skippedUnknownTimeCount
+              ? `，保留 ${result.skippedUnknownTimeCount} 封时间不明邮件`
+              : ""),
+          type: result.failedCount ? "warning" : "success",
+        });
+      } catch (error) {
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token?.name || tokenId} 删除已读邮件失败: ${error.message}`,
+          type: "error",
+        });
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("一键邮件删除执行结束");
   };
 
   /**
@@ -1504,6 +1582,7 @@ export function createTasksItem(deps) {
     batchBookUpgrade,
     batchClaimStarRewards,
     batchMarkMailRead,
+    batchDeleteReadMails,
     batchClaimPeachTasks,
     batchGenieSweep,
   };

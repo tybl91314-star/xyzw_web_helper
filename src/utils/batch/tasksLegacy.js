@@ -3,6 +3,18 @@
  * 包含: batchLegacyClaim, batchLegacyGiftSendEnhanced
  */
 
+import {
+  getClaimableLegacyGiftTaskIds,
+  getLegacyGiftRemainingLimit,
+  getLegacyGiftTarget,
+  isRetryableGiftTransportError,
+  LEGACY_GIFT_CHUNK_DELAY_MS,
+  LEGACY_FRAGMENT_ITEM_ID,
+  LEGACY_GIFT_MAX_PER_REQUEST,
+  LEGACY_GIFT_RATE_LIMIT_RETRY_DELAY_MS,
+  waitForLegacyGift,
+} from "./legacyGift.js";
+
 /**
  * 创建功法类任务执行器
  * @param {Object} deps - 依赖项
@@ -26,7 +38,8 @@ export function createTasksLegacy(deps) {
     recipientIdInput,
     recipientInfo,
     securityPassword,
-    giftQuantity,
+    giftMode,
+    giftQuantityWan,
     delayConfig,
   } = deps;
 
@@ -111,8 +124,9 @@ export function createTasksLegacy(deps) {
 
     const giftConfig = {
       recipientId: Number(recipientId),
-      itemId: 37007,
-      quantity: Math.min(giftQuantity.value, 9999) || 0,
+      itemId: LEGACY_FRAGMENT_ITEM_ID,
+      mode: giftMode.value,
+      quantityWan: giftQuantityWan.value,
       serverName: recipientInfo.value?.serverName || "",
       name: recipientInfo.value?.name || "",
     };
@@ -123,9 +137,17 @@ export function createTasksLegacy(deps) {
         return;
       }
 
-      if (giftConfig.quantity <= 0 || giftConfig.quantity > 9999) {
-        message.error("赠送数量必须在1-9999之间");
-        return;
+      if (giftConfig.mode === "specific") {
+        try {
+          getLegacyGiftTarget({
+            mode: giftConfig.mode,
+            quantityWan: giftConfig.quantityWan,
+            inventory: Number.MAX_SAFE_INTEGER,
+          });
+        } catch (error) {
+          message.error(error.message);
+          return;
+        }
       }
     }
 
@@ -144,25 +166,92 @@ export function createTasksLegacy(deps) {
       tokenStatus.value[tokenId] = "running";
 
       const token = tokens.value.find((t) => t.id === tokenId);
-      let consecutiveErrors = 0;
-      const maxRetries = 2;
-
-      while (consecutiveErrors <= maxRetries && !shouldStop.value) {
-        try {
+      try {
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `=== 开始赠送功法残卷: ${token.name} (尝试 ${consecutiveErrors + 1}/${maxRetries + 1}) ===`,
+            message: `=== 开始赠送功法残卷: ${token.name} ===`,
             type: "info",
           });
 
           await ensureConnection(tokenId);
 
+          // 客户端的“提升上限”实际调用 legacy_claimgifttask。
+          // 先读取任务进度，只尝试领取进度高于已领取记录的额度任务；
+          // 未完成任务会被服务器拒绝，网络类错误则继续向上抛，避免误判。
+          let legacyInfo = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "legacy_getinfo",
+            {},
+            5000,
+          );
+          let roleLegacy = legacyInfo?.roleLegacy || {};
+          let claimedLimitTaskCount = 0;
+          for (let pass = 0; pass < 10; pass++) {
+            const taskIds = getClaimableLegacyGiftTaskIds(roleLegacy);
+            if (taskIds.length === 0) {
+              if (pass === 0) {
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 当前没有需要领取的赠送上限任务`,
+                  type: "info",
+                });
+              }
+              break;
+            }
+
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 检测到 ${taskIds.length} 个可尝试提升赠送上限的任务`,
+              type: "info",
+            });
+
+            let claimedInPass = 0;
+            for (const taskId of taskIds) {
+              try {
+                const claimResp = await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "legacy_claimgifttask",
+                  { id: taskId },
+                  5000,
+                );
+                roleLegacy = claimResp?.roleLegacy || roleLegacy;
+                claimedInPass++;
+                claimedLimitTaskCount++;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 已领取功法赠送上限任务 ${taskId}`,
+                  type: "success",
+                });
+                await waitForLegacyGift(LEGACY_GIFT_CHUNK_DELAY_MS);
+              } catch (error) {
+                if (isRetryableGiftTransportError(error)) throw error;
+                // 进度未完成时服务器会拒绝，跳过即可。
+              }
+            }
+            if (claimedInPass === 0) break;
+          }
+
+          if (claimedLimitTaskCount > 0) {
+            // 领取上限会触发服务端的操作频率保护，稍候再刷新和赠送。
+            await waitForLegacyGift(LEGACY_GIFT_RATE_LIMIT_RETRY_DELAY_MS);
+            legacyInfo = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "legacy_getinfo",
+              {},
+              5000,
+            );
+            roleLegacy = legacyInfo?.roleLegacy || roleLegacy;
+          }
+
           const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-          const legacyFragmentCount =
-            Math.min(
-              roleInfo?.role?.items?.[giftConfig.itemId]?.quantity,
-              9999,
-            ) || 0;
+          const remainingGiftLimit = getLegacyGiftRemainingLimit({
+            role: roleInfo?.role,
+            roleLegacy,
+          });
+          const legacyFragmentCount = Math.max(
+            0,
+            Number(roleInfo?.role?.items?.[giftConfig.itemId]?.quantity) || 0,
+          );
           if (isScheduledTask) {
             if (legacyFragmentCount === 0) {
               addLog({
@@ -172,7 +261,7 @@ export function createTasksLegacy(deps) {
               });
               tokenStatus.value[tokenId] = "failed";
               totalFailed++;
-              break;
+              return;
             }
             const rankroleinfo = await tokenStore.sendMessageWithPromise(
               tokenId,
@@ -195,20 +284,32 @@ export function createTasksLegacy(deps) {
               });
               tokenStatus.value[tokenId] = "failed";
               totalFailed++;
-              break;
+              return;
             }
-            giftConfig.quantity = legacyFragmentCount;
           }
 
-          if (legacyFragmentCount < giftConfig.quantity) {
+          const requestedQuantity = getLegacyGiftTarget({
+            mode: giftConfig.mode,
+            quantityWan: giftConfig.quantityWan,
+            inventory: legacyFragmentCount,
+          });
+          const targetQuantity = Math.min(
+            requestedQuantity,
+            remainingGiftLimit,
+          );
+
+          if (targetQuantity <= 0) {
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `=== ${token.name} 功法残卷不足，当前拥有: ${legacyFragmentCount}，需要: ${giftConfig.quantity} ===`,
+              message:
+                remainingGiftLimit <= 0
+                  ? `=== ${token.name} 今日功法残卷赠送额度已用完 ===`
+                  : `=== ${token.name} 当前没有可赠送的功法残卷 ===`,
               type: "error",
             });
             tokenStatus.value[tokenId] = "failed";
             totalFailed++;
-            break;
+            return;
           }
 
           addLog({
@@ -217,7 +318,7 @@ export function createTasksLegacy(deps) {
             type: "info",
           });
 
-          const commitPasswordResp = await tokenStore.sendMessageWithPromise(
+          await tokenStore.sendMessageWithPromise(
             tokenId,
             "role_commitpassword",
             {
@@ -227,19 +328,9 @@ export function createTasksLegacy(deps) {
             5000,
           );
 
-          if (!commitPasswordResp) {
-            throw new Error("安全密码验证请求无响应");
-          }
-          if (!commitPasswordResp.role?.statistics?.["que:wh:tm"]) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} === 密码解除失败,请检查密码是否配置正确 ===`,
-              type: "error",
-            });
-            tokenStatus.value[tokenId] = "failed";
-            totalFailed++;
-            break;
-          }
+          // sendMessageWithPromise 会在服务端返回非 0 错误码（包括密码错误）时
+          // 直接 reject。成功响应并不保证携带完整 role.statistics，不能再用
+          // que:wh:tm 是否存在判断密码，否则会把有效密码误报为错误。
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `=== 安全密码验证成功 ===`,
@@ -248,38 +339,56 @@ export function createTasksLegacy(deps) {
 
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `${token.name} === 开始赠送功法残卷${giftConfig.quantity}个,目标:[${giftConfig.serverName}] ID:${giftConfig.recipientId} ${giftConfig.name} ===`,
+            message: `${token.name} === 计划赠送功法残卷 ${targetQuantity} 个（库存 ${legacyFragmentCount}，当前可赠额度 ${remainingGiftLimit === Number.MAX_SAFE_INTEGER ? "不限" : remainingGiftLimit}），目标:[${giftConfig.serverName}] ID:${giftConfig.recipientId} ${giftConfig.name} ===`,
             type: "info",
           });
 
-          const legacySendGiftResp = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "legacy_sendgift",
-            {
-              itemCnt: giftConfig.quantity,
-              legacyUIds: [],
-              targetId: giftConfig.recipientId,
-            },
-            5000,
-          );
+          let sentQuantity = 0;
+          let remainingQuantity = targetQuantity;
 
-          if (!legacySendGiftResp) {
-            throw new Error("赠送请求无响应");
+          const sendGiftChunk = async (quantity) => {
+            const response = await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "legacy_sendgift",
+              {
+                itemCnt: quantity,
+                legacyUIds: [],
+                targetId: giftConfig.recipientId,
+              },
+              8000,
+            );
+            if (!response) throw new Error("赠送请求无响应");
+            sentQuantity += quantity;
+            remainingQuantity -= quantity;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 已赠送 ${quantity} 个，累计 ${sentQuantity}/${targetQuantity}`,
+              type: "success",
+            });
+            if (remainingQuantity > 0) {
+              await waitForLegacyGift(LEGACY_GIFT_CHUNK_DELAY_MS);
+            }
+          };
+
+          while (remainingQuantity > 0 && !shouldStop.value) {
+            const chunk = Math.min(
+              remainingQuantity,
+              LEGACY_GIFT_MAX_PER_REQUEST,
+            );
+            await sendGiftChunk(chunk);
           }
 
           await tokenStore.sendMessage(tokenId, "role_getroleinfo");
 
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} 成功赠送功法残卷${giftConfig.quantity}个给[${giftConfig.serverName}] ID:${giftConfig.recipientId} ${giftConfig.name} ===`,
+            message: `=== ${token.name} 成功赠送功法残卷 ${sentQuantity} 个给[${giftConfig.serverName}] ID:${giftConfig.recipientId} ${giftConfig.name} ===`,
             type: "success",
           });
 
           tokenStatus.value[tokenId] = "completed";
           totalSuccess++;
-          break;
         } catch (error) {
-          consecutiveErrors++;
           console.error(`赠送失败: ${error.message}`);
 
           let errorMsg = error.message || "未知错误";
@@ -295,23 +404,13 @@ export function createTasksLegacy(deps) {
             errorType = "warning";
           }
 
-          if (consecutiveErrors <= maxRetries && !shouldStop.value) {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `=== ${token.name} 赠送功法残卷失败: ${errorMsg}，将在3秒后重试 ===`,
-              type: "warning",
-            });
-            await new Promise((r) => setTimeout(r, delayConfig.long));
-          } else {
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `=== ${token.name} 赠送功法残卷失败: ${errorMsg}，已达最大重试次数 ===`,
-              type: "error",
-            });
-            tokenStatus.value[tokenId] = "failed";
-            totalFailed++;
-            break;
-          }
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `=== ${token.name} 赠送功法残卷失败: ${errorMsg} ===`,
+            type: errorType,
+          });
+          tokenStatus.value[tokenId] = "failed";
+          totalFailed++;
         } finally {
           tokenStore.closeWebSocketConnection(tokenId);
           releaseConnectionSlot();
@@ -321,7 +420,6 @@ export function createTasksLegacy(deps) {
             type: "info",
           });
         }
-      }
     });
 
     await Promise.all(taskPromises);

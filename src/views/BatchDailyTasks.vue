@@ -351,6 +351,17 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="batchDirectSendCar"
+                  :disabled="
+                    isRunning ||
+                    selectedTokens.length === 0 ||
+                    !isCarActivityOpen
+                  "
+                >
+                  直接发车
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchClaimCars"
                   :disabled="
                     isRunning ||
@@ -384,13 +395,20 @@
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="dungeon" tab="副本">
-              <n-space>
+              <div class="dungeon-task-grid">
                 <n-button
                   size="small"
                   @click="climbTower"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键爬塔
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchClaimPeachTasks"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键领取蟠桃园任务
                 </n-button>
                 <n-button
                   size="small"
@@ -405,20 +423,6 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="skinChallenge"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键换皮闯关
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimPeachTasks"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  一键领取蟠桃园任务
-                </n-button>
-                <n-button
-                  size="small"
                   @click="batchBuyDreamItems"
                   :disabled="
                     isRunning ||
@@ -428,7 +432,20 @@
                 >
                   一键购买梦境商品
                 </n-button>
-              </n-space>
+                <n-button
+                  size="small"
+                  @click="skinChallenge"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键换皮闯关
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchClaimFreeEnergy"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  换皮闯关协议诊断
+                </n-button>
                 <n-popselect
                   :value="footballPick"
                   :options="footballPickOptions"
@@ -442,6 +459,7 @@
                     一键竞猜({{ footballPickLabel }})
                   </n-button>
                 </n-popselect>
+              </div>
             </n-tab-pane>
             <n-tab-pane name="baoku" tab="宝库">
               <n-space>
@@ -515,17 +533,6 @@
                 >
                   一键怪异塔合成
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimFreeEnergy"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键领取怪异塔免费道具
-                </n-button>
               </n-space>
             </n-tab-pane>
             <n-tab-pane name="resource" tab="资源">
@@ -592,6 +599,13 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   领取邮件并已读
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchDeleteReadMails"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键邮件删除
                 </n-button>
                 <n-button
                   size="small"
@@ -996,36 +1010,32 @@
       v-model:show="showTemplateManagerModal"
       preset="card"
       title="任务模板管理"
-      style="width: 90%; max-width: 800px"
+      class="task-template-manager-modal"
     >
       <div class="settings-content">
-        <div
-          class="modal-header-actions"
-          style="
-            margin-bottom: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          "
-        >
-          <div>
+        <div class="template-manager-toolbar">
+          <div class="template-manager-buttons">
             <n-button type="primary" @click="openNewTemplateModal"
               >新增模板</n-button
             >
             <n-button
               @click="openApplyTemplateModal"
               type="success"
-              style="margin-left: 8px"
               >应用模板</n-button
             >
             <n-button
               @click="openAccountTemplateModal"
               type="info"
-              style="margin-left: 8px"
               >查看账号模板引用</n-button
             >
           </div>
-          <n-input placeholder="搜索模板" size="small" style="width: 200px" />
+          <n-input
+            v-model:value="taskTemplateSearch"
+            placeholder="搜索模板"
+            clearable
+            size="small"
+            class="template-manager-search"
+          />
         </div>
 
         <!-- Template List -->
@@ -1039,14 +1049,8 @@
             size="small"
             style="margin-bottom: 12px"
           >
-            <div
-              style="
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-              "
-            >
-              <div>
+            <div class="template-manager-item">
+              <div class="template-manager-item-info">
                 <h4 style="margin: 0; margin-bottom: 8px">
                   {{ template.name }}
                 </h4>
@@ -1058,7 +1062,7 @@
                   >
                 </div>
               </div>
-              <div style="display: flex; gap: 8px">
+              <div class="template-manager-item-actions">
                 <n-button size="small" @click="openEditTemplateModal(template)"
                   >编辑</n-button
                 >
@@ -1218,64 +1222,21 @@
           <!-- 接收者信息展示 -->
           <div class="setting-item" v-if="recipientInfo">
             <label class="setting-label">接收者信息</label>
-            <div
-              class="recipient-info"
-              style="
-                background: #f7f8fa;
-                padding: 16px;
-                border-radius: 8px;
-                border: 1px solid #e5e7eb;
-                display: flex;
-                align-items: flex-start;
-                gap: 16px;
-                transition: all 0.3s ease;
-              "
-            >
+            <div class="recipient-info recipient-info--compact">
               <!-- 头像部分 -->
-              <div
-                class="avatar-container"
-                style="
-                  position: relative;
-                  width: 80px;
-                  height: 80px;
-                  border-radius: 50%;
-                  overflow: hidden;
-                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  transition: all 0.3s ease;
-                "
-              >
+              <div class="avatar-container recipient-avatar">
                 <img
                   v-if="recipientInfo.avatarUrl && !avatarLoadError"
                   :src="recipientInfo.avatarUrl"
                   alt="角色头像"
-                  style="
-                    width: 100%;
-                    height: 100%;
-                    object-fit: cover;
-                    transition: all 0.3s ease;
-                  "
+                  class="recipient-avatar__image"
                   @error="handleAvatarError"
                   @load="handleAvatarLoad"
                 />
                 <!-- 头像加载失败或未设置时的 fallback -->
                 <div
                   v-else
-                  class="avatar-fallback"
-                  style="
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 100%;
-                    height: 100%;
-                    color: white;
-                    font-size: 24px;
-                    font-weight: bold;
-                    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
-                  "
+                  class="avatar-fallback recipient-avatar__fallback"
                 >
                   {{ (recipientInfo.name || "未知角色")[0] || "?" }}
                 </div>
@@ -1311,116 +1272,20 @@
               </div>
 
               <!-- 角色信息部分 -->
-              <div class="role-info" style="flex: 1; min-width: 0">
-                <div
-                  style="
-                    margin-bottom: 12px;
-                    font-size: 18px;
-                    font-weight: bold;
-                    color: #1d2129;
-                    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-                  "
-                >
-                  {{ recipientInfo.name || "未知角色" }}
+              <div class="recipient-summary">
+                <div class="recipient-summary__row recipient-summary__primary">
+                  <strong>{{ recipientInfo.name || "未知角色" }}</strong>
+                  <span>ID：{{ recipientInfo.roleId }}</span>
                 </div>
-                <div
-                  class="role-info-grid"
-                  style="
-                    display: grid;
-                    grid-template-columns: 1fr 1fr;
-                    gap: 12px;
-                  "
-                >
-                  <div class="info-item">
-                    <div
-                      class="info-label"
-                      style="
-                        font-size: 12px;
-                        color: #86909c;
-                        margin-bottom: 2px;
-                      "
-                    >
-                      角色ID
-                    </div>
-                    <div
-                      class="info-value"
-                      style="font-size: 14px; font-weight: 500; color: #1d2129"
-                    >
-                      {{ recipientInfo.roleId }}
-                    </div>
-                  </div>
-                  <div class="info-item">
-                    <div
-                      class="info-label"
-                      style="
-                        font-size: 12px;
-                        color: #86909c;
-                        margin-bottom: 2px;
-                      "
-                    >
-                      服务器
-                    </div>
-                    <div
-                      class="info-value"
-                      style="font-size: 14px; font-weight: 500; color: #1d2129"
-                    >
-                      {{ recipientInfo.serverName }}
-                    </div>
-                  </div>
-                  <div class="info-item">
-                    <div
-                      class="info-label"
-                      style="
-                        font-size: 12px;
-                        color: #86909c;
-                        margin-bottom: 2px;
-                      "
-                    >
-                      战力
-                    </div>
-                    <div
-                      class="info-value"
-                      style="font-size: 16px; font-weight: 600; color: #667eea"
-                    >
-                      {{ recipientInfo.power }} {{ recipientInfo.powerUnit }}
-                    </div>
-                  </div>
-                  <div class="info-item">
-                    <div
-                      class="info-label"
-                      style="
-                        font-size: 12px;
-                        color: #86909c;
-                        margin-bottom: 2px;
-                      "
-                    >
-                      军团
-                    </div>
-                    <div
-                      class="info-value"
-                      style="font-size: 14px; font-weight: 500; color: #1d2129"
-                    >
-                      {{ recipientInfo.legionName || "无" }}
-                    </div>
-                  </div>
-                  <div class="info-item" style="grid-column: 1 / -1">
-                    <div
-                      class="info-label"
-                      style="
-                        font-size: 12px;
-                        color: #86909c;
-                        margin-bottom: 2px;
-                      "
-                    >
-                      军团ID
-                    </div>
-                    <div
-                      class="info-value"
-                      style="font-size: 14px; font-weight: 500; color: #1d2129"
-                    >
-                      {{ recipientInfo.legionId || "无" }}
-                    </div>
-                  </div>
+                <div class="recipient-summary__row">
+                  <span>服务器：{{ recipientInfo.serverName || "未知" }}</span>
+                  <span class="recipient-summary__power">
+                    战力：{{ recipientInfo.power }}{{ recipientInfo.powerUnit }}
+                  </span>
+                </div>
+                <div class="recipient-summary__row">
+                  <span>军团：{{ recipientInfo.legionName || "无" }}</span>
+                  <span>军团ID：{{ recipientInfo.legionId || "无" }}</span>
                 </div>
               </div>
             </div>
@@ -1429,13 +1294,32 @@
           <!-- 赠送数量 -->
           <div class="setting-item">
             <label class="setting-label">赠送数量</label>
-            <n-input-number
-              v-model:value="giftQuantity"
-              :min="1"
-              :max="1000"
-              :step="1"
-              placeholder="请输入赠送数量"
-            />
+            <div class="legacy-gift-quantity-row">
+              <n-radio-group v-model:value="giftMode" name="legacy-gift-mode">
+                <n-radio-button value="all">所有</n-radio-button>
+                <n-radio-button value="specific">指定数量</n-radio-button>
+              </n-radio-group>
+              <n-input-number
+                v-if="giftMode === 'specific'"
+                v-model:value="giftQuantityWan"
+                class="legacy-gift-quantity-input"
+                :min="0.1"
+                :max="100"
+                :step="0.1"
+                :precision="1"
+                placeholder="0.1 - 100"
+              >
+                <template #suffix>万</template>
+              </n-input-number>
+            </div>
+            <n-text depth="3" style="font-size: 12px">
+              <template v-if="giftMode === 'specific'">
+                指定数量：按填写数量赠送，但不超过每个账号的库存和当前可赠额度；单次最多9999，超过时自动分批。
+              </template>
+              <template v-else>
+                所有：按每个账号的库存和可赠额度赠送；单次最多9999，超过时自动分批。
+              </template>
+            </n-text>
           </div>
         </div>
 
@@ -1587,7 +1471,7 @@
     >
       <div class="tasks-list" style="max-height: 600px; overflow-y: auto">
         <div
-          v-for="task in scheduledTasks"
+          v-for="task in sortedScheduledTasks"
           :key="task.id"
           class="task-item"
           style="
@@ -3076,6 +2960,7 @@ const selectedTemplateId = ref(null);
 const selectedTokensForApply = ref([]);
 const currentTemplateName = ref("");
 const currentTemplateId = ref(null); // 用于编辑现有模板
+const taskTemplateSearch = ref("");
 const currentTemplate = reactive({
   arenaFormation: 1,
   towerFormation: 1,
@@ -3112,7 +2997,13 @@ const isIndeterminateForApply = computed(() => {
 
 // Computed for Template Manager
 const filteredTaskTemplates = computed(() => {
-  return taskTemplates.value;
+  const keyword = taskTemplateSearch.value.trim().toLowerCase();
+  if (!keyword) return taskTemplates.value;
+  return taskTemplates.value.filter((template) =>
+    String(template.name || "")
+      .toLowerCase()
+      .includes(keyword),
+  );
 });
 
 // Helper Modal State
@@ -3224,7 +3115,8 @@ const recipientIdInput = ref("");
 const recipientIdError = ref("");
 const recipientInfo = ref(null);
 const isQueryingRecipient = ref(false);
-const giftQuantity = ref(10);
+const giftMode = ref("all");
+const giftQuantityWan = ref(1);
 const securityPassword = ref(""); // 安全密码
 // 头像加载状态
 const isAvatarLoading = ref(false);
@@ -3236,6 +3128,14 @@ const avatarLoadError = ref(false);
 
 // Scheduled Tasks State Management
 const scheduledTasks = ref([]); // List of all scheduled tasks
+const sortedScheduledTasks = computed(() =>
+  [...scheduledTasks.value].sort((left, right) =>
+    String(left?.name || "").localeCompare(String(right?.name || ""), "zh-CN", {
+      numeric: false,
+      sensitivity: "base",
+    }),
+  ),
+);
 const showTaskModal = ref(false); // Control the visibility of the add/edit task modal
 const showTasksModal = ref(false); // Control the visibility of the tasks list modal
 const editingTask = ref(null); // Currently editing task
@@ -3264,6 +3164,7 @@ const taskGroupDefinitions = [
       "batchStudy",
       "batcharenafight",
       "batchSmartSendCar",
+      "batchDirectSendCar",
       "batchClaimCars",
       "store_purchase",
       "collection_claimfreereward",
@@ -3277,6 +3178,7 @@ const taskGroupDefinitions = [
       "climbTower",
       "batchmengjing",
       "skinChallenge",
+      "batchClaimFreeEnergy",
       "batchClaimPeachTasks",
       "batchBuyDreamItems",
     ],
@@ -3289,7 +3191,6 @@ const taskGroupDefinitions = [
       "climbWeirdTower",
       "batchUseItems",
       "batchMergeItems",
-      "batchClaimFreeEnergy",
     ],
   },
   {
@@ -3302,6 +3203,7 @@ const taskGroupDefinitions = [
       "batchFish",
       "batchRecruit",
       "batchMarkMailRead",
+      "batchDeleteReadMails",
       "legion_storebuygoods",
     ],
   },
@@ -4362,7 +4264,7 @@ const executeScheduledTask = async (task) => {
       }
 
       if (
-        ["batchSmartSendCar", "batchClaimCars"].includes(taskName) &&
+        ["batchSmartSendCar", "batchDirectSendCar", "batchClaimCars"].includes(taskName) &&
         !isCarActivityOpenAt(Date.now())
       ) {
         addLog({
@@ -4390,7 +4292,6 @@ const executeScheduledTask = async (task) => {
           "climbWeirdTower",
           "batchUseItems",
           "batchMergeItems",
-          "batchClaimFreeEnergy",
         ].includes(taskName) &&
         !isWeirdTowerActivityOpen.value
       ) {
@@ -4693,13 +4594,12 @@ const confirmLegacyGift = async () => {
     return;
   }
 
-  // 调用增强版批量赠送功能
-  await batchLegacyGiftSendEnhanced();
-
-  // 关闭模态框
+  // 任务函数在第一个异步请求前会同步读取密码与接收者配置；先启动任务，
+  // 随即关闭弹窗，避免整批执行期间赠送窗口一直遮挡页面。
+  const executionPromise = batchLegacyGiftSendEnhanced();
   showLegacyGiftModal.value = false;
-  // 清空安全密码
   securityPassword.value = "";
+  await executionPromise;
 };
 
 const executeHelper = () => {
@@ -5455,7 +5355,8 @@ const createTaskDeps = () => ({
   recipientIdInput,
   recipientInfo,
   securityPassword,
-  giftQuantity,
+  giftMode,
+  giftQuantityWan,
   // 竞技场相关辅助函数
   pickArenaTargetId,
   getTodayStartSec,
@@ -5489,7 +5390,7 @@ const {
 } = tasksTower;
 
 const tasksCar = createTasksCar(createTaskDeps());
-const { batchSmartSendCar, batchClaimCars } = tasksCar;
+const { batchSmartSendCar, batchDirectSendCar, batchClaimCars } = tasksCar;
 
 const tasksItem = createTasksItem(createTaskDeps());
 const {
@@ -5502,6 +5403,7 @@ const {
   batchBookUpgrade,
   batchClaimStarRewards,
   batchMarkMailRead,
+  batchDeleteReadMails,
   batchClaimPeachTasks,
   batchGenieSweep,
 } = tasksItem;
@@ -5698,6 +5600,90 @@ const stopBatch = () => {
   flex-wrap: wrap;
   gap: 12px;
   margin-bottom: 20px;
+}
+
+.recipient-info--compact {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 72px;
+  padding: 8px 10px;
+  overflow: hidden;
+  background: #f7f8fa;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+}
+
+.recipient-avatar {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  flex: 0 0 64px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+.recipient-avatar__image,
+.recipient-avatar__fallback {
+  width: 100%;
+  height: 100%;
+}
+
+.recipient-avatar__image {
+  object-fit: cover;
+}
+
+.recipient-avatar__fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.recipient-summary {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #4e5969;
+}
+
+.recipient-summary__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.recipient-summary__row > span,
+.recipient-summary__row > strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.recipient-summary__primary {
+  color: #1d2129;
+}
+
+.recipient-summary__primary strong {
+  font-size: 14px;
+}
+
+.recipient-summary__power {
+  color: #4f6bdc;
+  font-weight: 600;
 }
 
 .header-overview {
@@ -5939,6 +5925,36 @@ const stopBatch = () => {
   color: #666;
 }
 
+.legacy-gift-quantity-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.legacy-gift-quantity-row :deep(.n-radio-group) {
+  display: flex;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.legacy-gift-quantity-input {
+  width: 132px;
+  flex: 0 0 132px;
+}
+
+.dungeon-task-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.dungeon-task-grid > :deep(.n-button),
+.dungeon-task-grid > :deep(.n-popselect) {
+  width: 100%;
+  min-width: 0;
+}
+
 .setting-switches {
   display: flex;
   flex-direction: column;
@@ -5977,6 +5993,51 @@ const stopBatch = () => {
 
 .batch-function-tab-grid {
   display: none;
+}
+
+:global(.task-template-manager-modal.n-card) {
+  width: min(800px, calc(100vw - 24px));
+  max-height: calc(100dvh - var(--mobile-status-bar-gap, 24px) - 90px);
+}
+
+:global(.task-template-manager-modal .n-card__content) {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.template-manager-toolbar,
+.template-manager-buttons,
+.template-manager-item,
+.template-manager-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.template-manager-toolbar {
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.template-manager-buttons {
+  flex-wrap: wrap;
+}
+
+.template-manager-search {
+  width: 200px;
+  flex: 0 0 200px;
+}
+
+.template-manager-item {
+  justify-content: space-between;
+}
+
+.template-manager-item-info {
+  min-width: 0;
+}
+
+.template-manager-item-actions {
+  flex: 0 0 auto;
 }
 
 /* Responsive Design */
@@ -6209,6 +6270,41 @@ const stopBatch = () => {
 }
 
 @media (max-width: 768px) {
+  .template-manager-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .template-manager-buttons {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .template-manager-buttons :deep(.n-button) {
+    width: 100%;
+    min-width: 0;
+    padding: 0 8px;
+  }
+
+  .template-manager-buttons :deep(.n-button:last-child) {
+    grid-column: 1 / -1;
+  }
+
+  .template-manager-search {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .template-manager-item {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .template-manager-item-actions {
+    align-self: flex-end;
+  }
+
   .batch-group-create-row {
     display: flex;
   }
@@ -6450,17 +6546,10 @@ const stopBatch = () => {
     font-weight: 600;
   }
 
-  /* 响应式设计 */
-  @media (max-width: 600px) {
-    .recipient-info {
-      flex-direction: column;
-      align-items: center;
-      text-align: center;
-    }
-
-    .avatar-container {
-      margin-bottom: 12px;
-    }
+  .recipient-info--compact {
+    flex-direction: row;
+    align-items: center;
+    text-align: left;
   }
 }
 </style>
