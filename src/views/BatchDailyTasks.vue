@@ -387,6 +387,13 @@
                 </n-button>
                 <n-button
                   size="small"
+                  @click="activity_claimweeklyfree"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键领取单周福利
+                </n-button>
+                <n-button
+                  size="small"
                   @click="batchGenieSweep"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
@@ -444,7 +451,7 @@
                   @click="batchClaimFreeEnergy"
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
-                  换皮闯关协议诊断
+                  换皮闯关道具领取
                 </n-button>
                 <n-popselect
                   :value="footballPick"
@@ -3168,6 +3175,7 @@ const taskGroupDefinitions = [
       "batchClaimCars",
       "store_purchase",
       "collection_claimfreereward",
+      "activity_claimweeklyfree",
       "batchGenieSweep",
     ],
   },
@@ -5421,6 +5429,7 @@ const {
   legionStoreBuySkinCoins,
   store_purchase,
   collection_claimfreereward,
+  activity_claimweeklyfree,
 } = tasksStore;
 
 const tasksLegacy = createTasksLegacy(createTaskDeps());

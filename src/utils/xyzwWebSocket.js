@@ -311,6 +311,11 @@ export function registerDefaultCommands(reg) {
     .register("dungeon_buymerchant")
     // 活动/任务
     .register("activity_get")
+    .register("activity_buystoregoods", {
+      activityId: 0,
+      goodsIndex: 0,
+      buyNum: 1,
+    })
     .register("activity_recyclewarorderrewardclaim")
     .register("legion_getpayloadtask")
     .register("legion_getpayloadkillrecord")
@@ -1049,6 +1054,7 @@ export class XyzwWebSocketClient {
       // 1:1 响应映射（优先级高）
       fight_startpvpresp: "fight_startpvp",
       activity_getresp: "activity_get",
+      activity_buystoregoodsresp: "activity_buystoregoods",
       collection_goodslistresp: "collection_goodslist",
       collection_claimfreerewardresp: "collection_claimfreereward",
       legion_getarearankresp: "legion_getarearank",

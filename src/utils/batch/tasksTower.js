@@ -7,6 +7,33 @@ import { getTowerActId } from "../towerActId.js";
 import { normalizeWeirdTowerMaxClimb } from "../towerClimbLimit.js";
 
 /**
+ * 动态定位当前换皮闯关对应的“赛场补给”活动。
+ * 主活动和补给活动按服务端同批次连续编号返回，例如 2608072 -> 2608073，
+ * 因此不依赖日期或固定活动编号。
+ */
+export function findSkinChallengeSupplyActivityId(result) {
+  const responseBody = result?.body ?? result;
+  const activityState = responseBody?.activity ?? responseBody;
+  const commonActivityInfo = activityState?.commonActivityInfo ?? {};
+  const commonActivityIds = Object.keys(commonActivityInfo)
+    .map(Number)
+    .filter(Number.isFinite)
+    .sort((left, right) => left - right);
+
+  const eGameActivityId = Number(activityState?.actEGameInfo?.actId);
+  if (Number.isFinite(eGameActivityId)) {
+    const adjacentSupplyId = eGameActivityId + 1;
+    if (commonActivityIds.includes(adjacentSupplyId)) return adjacentSupplyId;
+  }
+
+  const namedEntry = Object.entries(commonActivityInfo).find(([, info]) => {
+    const text = JSON.stringify(info ?? {});
+    return /赛场补给|免费补给/.test(text) && !/充值/.test(text);
+  });
+  return namedEntry ? Number(namedEntry[0]) : null;
+}
+
+/**
  * 创建爬塔类任务执行器
  * @param {Object} deps - 依赖项
  * @returns {Object} 任务函数集合
@@ -31,48 +58,8 @@ export function createTasksTower(deps) {
     weirdTowerMaxClimb,
   } = deps;
 
-  const getMergeBox = (response) =>
-    response?.mergeBox || response?.body?.mergeBox || null;
-
   const wait = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-  const serializeDiagnostic = (value) => {
-    const seen = new WeakSet();
-    const redactKey = /token|password|secret|ticket|session|openid|auth/i;
-    const normalize = (current, depth = 0) => {
-      if (current === null || typeof current !== "object") return current;
-      if (depth >= 8) return "[层级过深]";
-      if (seen.has(current)) return "[循环引用]";
-      seen.add(current);
-      if (Array.isArray(current)) {
-        const items = current.slice(0, 50).map((item) => normalize(item, depth + 1));
-        if (current.length > 50) items.push(`[其余 ${current.length - 50} 项已省略]`);
-        return items;
-      }
-      return Object.fromEntries(
-        Object.entries(current).map(([key, item]) => [
-          key,
-          redactKey.test(key) ? "[已隐藏]" : normalize(item, depth + 1),
-        ]),
-      );
-    };
-    const json = JSON.stringify(normalize(value));
-    return json.length > 16000 ? `${json.slice(0, 16000)}...[内容过长已截断]` : json;
-  };
-
-  const addDiagnosticLogs = (tokenName, label, value) => {
-    const text = serializeDiagnostic(value);
-    const chunkSize = 700;
-    const total = Math.max(1, Math.ceil(text.length / chunkSize));
-    for (let index = 0; index < total; index += 1) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `${tokenName} 诊断[${label} ${index + 1}/${total}] ${text.slice(index * chunkSize, (index + 1) * chunkSize)}`,
-        type: "info",
-      });
-    }
-  };
 
   /**
    * 爬塔
@@ -590,10 +577,7 @@ export function createTasksTower(deps) {
     message.success("批量爬怪异塔结束");
   };
 
-  /**
-   * 换皮闯关协议诊断。
-   * 仅调用只读信息接口，不执行领取、购买、发射或其他资源操作。
-   */
+  /** 换皮闯关道具领取 */
   const batchClaimFreeEnergy = async () => {
     if (selectedTokens.value.length === 0) return;
     isRunning.value = true;
@@ -611,41 +595,36 @@ export function createTasksTower(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始换皮闯关协议诊断: ${token.name}（只读，不领取或消耗） ===`,
+          message: `=== 开始领取换皮闯关道具: ${token.name} ===`,
           type: "info",
         });
 
         await ensureConnection(tokenId);
 
-        const requestedActId = getTowerActId();
-        const towerResult = await tokenStore.sendMessageWithPromise(
+        const activityResult = await tokenStore.sendMessageWithPromise(
           tokenId,
-          "towers_getinfo",
-          { actId: requestedActId },
+          "activity_get",
+          {},
           10000,
         );
+        const supplyActivityId = findSkinChallengeSupplyActivityId(activityResult);
+        if (!supplyActivityId) {
+          throw new Error("未找到当前换皮闯关对应的赛场补给活动");
+        }
+
+        const claimResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_buystoregoods",
+          { activityId: supplyActivityId, goodsIndex: 0, buyNum: 1 },
+          10000,
+        );
+        if (claimResult?.error) throw new Error(claimResult.error);
+
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} towers_getinfo 请求活动编号: ${requestedActId}`,
-          type: "info",
+          message: `${token.name} 赛场补给免费道具领取成功（活动 ${supplyActivityId}）`,
+          type: "success",
         });
-        addDiagnosticLogs(token.name, "towers_getinfo", towerResult);
-
-        try {
-          const activityResult = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "activity_get",
-            {},
-            10000,
-          );
-          addDiagnosticLogs(token.name, "activity_get", activityResult);
-        } catch (activityError) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== ${token.name} activity_get 诊断读取失败: ${activityError.message || "未知错误"} ===`,
-            type: "warning",
-          });
-        }
 
         tokenStatus.value[tokenId] = "completed";
       } catch (error) {
@@ -653,7 +632,7 @@ export function createTasksTower(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 换皮闯关协议诊断失败: ${error.message || "未知错误"}`,
+          message: `=== ${token.name} 换皮闯关道具领取失败: ${error.message || "未知错误"}`,
           type: "error",
         });
       } finally {
@@ -671,7 +650,7 @@ export function createTasksTower(deps) {
 
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("换皮闯关协议诊断结束，请复制执行日志");
+    message.success("换皮闯关道具领取结束");
   };
 
   /**
@@ -870,8 +849,8 @@ export function createTasksTower(deps) {
             }
         }
 
-        // 恢复 1.4.1 的完整顺序：先结算闯关活动奖励，再领取免费道具，
-        // 最后复用当前活动连接发射。缺少结算步骤会被服务器以 2100010 拒绝。
+        // 闯关完成后结算活动奖励（该活动命令同时会使用现有发射道具）。
+        // 免费补给由独立的“换皮闯关道具领取”功能处理，避免闯关流程重复请求。
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `${token.name} 闯关结束，开始结算活动奖励`,
@@ -900,35 +879,6 @@ export function createTasksTower(deps) {
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 活动 ${rewardActId} 奖励结算完成（共 ${rewardClaimCount} 次）`,
-            type: "info",
-          });
-        }
-
-        try {
-          const freeInfo = await tokenStore.sendMessageWithPromise(
-            tokenId,
-            "mergebox_getinfo",
-            { actType: 1 },
-            5000,
-          );
-          const freeEnergy = Number(getMergeBox(freeInfo)?.freeEnergy || 0);
-          if (freeEnergy > 0) {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "mergebox_claimfreeenergy",
-              { actType: 1 },
-              5000,
-            );
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 已领取免费发射道具 ${freeEnergy} 个`,
-              type: "success",
-            });
-          }
-        } catch (freeError) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 免费道具暂不可领，继续发射现有道具`,
             type: "info",
           });
         }

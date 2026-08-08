@@ -1,7 +1,44 @@
 /**
  * 商店类任务
- * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase, collection_claimfreereward
+ * 包含: legion_storebuygoods, legionStoreBuySkinCoins, store_purchase,
+ * collection_claimfreereward, activity_claimweeklyfree
  */
+
+/**
+ * 从 activity_get 返回值中提取当前单周限时商店的免费商品。
+ * 活动 id 会随招募周、宝箱周等轮换，因此只依据服务端实时配置判断。
+ */
+export function findWeeklyFreeStoreGoods(result) {
+  const responseBody = result?.body ?? result;
+  const activityState = responseBody?.activity ?? responseBody;
+  const activityList = Array.isArray(activityState?.activity)
+    ? activityState.activity
+    : [];
+  const myStoreInfo = activityState?.myStoreInfo ?? {};
+
+  return activityList.flatMap((activity) => {
+    const goodsList = activity?.data?.goodsList;
+    const isLimitedStore =
+      activity?.name === "限时商店" || Number(activity?.type) === 4;
+    if (!isLimitedStore || !Array.isArray(goodsList)) return [];
+
+    const complete = myStoreInfo?.[String(activity.id)]?.complete ?? {};
+    return goodsList.flatMap((goods, goodsIndex) => {
+      if (Number(goods?.price) !== 0) return [];
+      const claimed = Boolean(
+        complete?.[goodsIndex] ?? complete?.[String(goodsIndex)] ?? false,
+      );
+      return [
+        {
+          activityId: Number(activity.id),
+          goodsIndex,
+          title: String(goods?.title || "单周活动免费福利"),
+          claimed,
+        },
+      ];
+    });
+  });
+}
 
 /**
  * 创建商店类任务执行器
@@ -391,10 +428,147 @@ export function createTasksStore(deps) {
     shouldStop.value = false;
   };
 
+  /**
+   * 一键领取当前单周活动限时商店的免费福利
+   */
+  const activity_claimweeklyfree = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((item) => item.id === tokenId);
+      const tokenName = token?.name || tokenId;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始领取单周活动免费福利: ${tokenName} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+        const activityResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_get",
+          {},
+          5000,
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, delayConfig.action),
+        );
+
+        if (activityResult?.error) {
+          throw new Error(activityResult.error);
+        }
+
+        const freeGoods = findWeeklyFreeStoreGoods(activityResult);
+        if (freeGoods.length === 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 当前没有可识别的单周活动免费福利`,
+            type: "warning",
+          });
+          tokenStatus.value[tokenId] = "completed";
+          return;
+        }
+
+        let claimedCount = 0;
+        for (const goods of freeGoods) {
+          if (shouldStop.value) break;
+
+          if (goods.claimed) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${tokenName} ${goods.title} 已领取，跳过`,
+              type: "info",
+            });
+            continue;
+          }
+
+          const claimResult = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "activity_buystoregoods",
+            {
+              activityId: goods.activityId,
+              goodsIndex: goods.goodsIndex,
+              buyNum: 1,
+            },
+            5000,
+          );
+          await new Promise((resolve) =>
+            setTimeout(resolve, delayConfig.action),
+          );
+
+          if (claimResult?.error) {
+            const errorText = String(claimResult.error);
+            if (
+              errorText.includes("已领取") ||
+              errorText.includes("领取过") ||
+              errorText.includes("购买数量超出")
+            ) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${tokenName} ${goods.title} 已领取，跳过`,
+                type: "info",
+              });
+              continue;
+            }
+            throw new Error(`${goods.title} 领取失败: ${errorText}`);
+          }
+
+          claimedCount += 1;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} ${goods.title} 领取成功`,
+            type: "success",
+          });
+        }
+
+        if (claimedCount === 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${tokenName} 单周活动免费福利无需重复领取`,
+            type: "info",
+          });
+        }
+        tokenStatus.value[tokenId] = "completed";
+      } catch (error) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 单周活动免费福利领取失败: ${error.message}`,
+          type: "error",
+        });
+        tokenStatus.value[tokenId] = "failed";
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
+          type: "info",
+        });
+      }
+    });
+
+    await Promise.all(taskPromises);
+    currentRunningTokenId.value = null;
+    isRunning.value = false;
+    shouldStop.value = false;
+  };
+
   return {
     legion_storebuygoods,
     legionStoreBuySkinCoins,
     store_purchase,
     collection_claimfreereward,
+    activity_claimweeklyfree,
   };
 }
