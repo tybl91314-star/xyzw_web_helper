@@ -466,6 +466,20 @@
                     一键竞猜({{ footballPickLabel }})
                   </n-button>
                 </n-popselect>
+                <n-button
+                  size="small"
+                  @click="batchMatchAppointment"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  比赛预约
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchApexGuess"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  逐鹿盐山竞猜
+                </n-button>
               </div>
             </n-tab-pane>
             <n-tab-pane name="baoku" tab="宝库">
@@ -585,6 +599,13 @@
                   :disabled="isRunning || selectedTokens.length === 0"
                 >
                   一键英雄升星
+                </n-button>
+                <n-button
+                  size="small"
+                  @click="batchFishSpiritUpgrade"
+                  :disabled="isRunning || selectedTokens.length === 0"
+                >
+                  一键鱼灵升星
                 </n-button>
                 <n-button
                   size="small"
@@ -2543,6 +2564,8 @@ import {
   createTasksStore,
   createTasksLegacy,
   createTasksFootball,
+  createTasksPKRoom,
+  createTasksApexGuess,
 } from "@/utils/batch";
 
 import { merchantConfig, goldItemsConfig } from "@/utils/dreamConstants";
@@ -3189,6 +3212,8 @@ const taskGroupDefinitions = [
       "batchClaimFreeEnergy",
       "batchClaimPeachTasks",
       "batchBuyDreamItems",
+      "batchMatchAppointment",
+      "batchApexGuess",
     ],
   },
   { name: "baoku", label: "宝库", tasks: ["batchbaoku13", "batchbaoku45"] },
@@ -5408,6 +5433,7 @@ const {
   batchFish,
   batchRecruit,
   batchHeroUpgrade,
+  batchFishSpiritUpgrade,
   batchBookUpgrade,
   batchClaimStarRewards,
   batchMarkMailRead,
@@ -5437,6 +5463,12 @@ const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;
 
 const tasksFootball = createTasksFootball(createTaskDeps());
 const { batchFootballBet } = tasksFootball;
+
+const tasksPKRoom = createTasksPKRoom(createTaskDeps());
+const { batchMatchAppointment } = tasksPKRoom;
+
+const tasksApexGuess = createTasksApexGuess(createTaskDeps());
+const { batchApexGuess } = tasksApexGuess;
 
 // 盐杯竞猜 pick 选择
 const footballPick = ref(3);

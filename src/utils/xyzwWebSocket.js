@@ -6,6 +6,7 @@
 import { $CacheManager } from "@/stores/cache";
 import { bonProtocol, g_utils } from "./bonProtocol.js";
 import { wsLogger, gameLogger } from "./logger.js";
+import { formatServerErrorMessage } from "./serverError.js";
 
 /**
  * 错误码映射表
@@ -22,7 +23,7 @@ const errorCodeMap = {
   7500140: "请先输入密码",
   7500100: "密码输入错误",
   7500120: "密码输入错误次数已达上限",
-  200400: "操作太快，请稍后再试",
+  200400: "触发服务器限流（请求过于频繁），请稍后再试",
   200760: "您当前看到的界面已发生变化，请重新登录",
   2300190: "今天已经签到过了",
   2300370: "俱乐部商品购买数量超出上限",
@@ -240,6 +241,8 @@ export function registerDefaultCommands(reg) {
     .register("evotower_getlegionjoinmembers")
     .register("evotower_readyfight")
     .register("evotower_claimreward")
+    .register("evotower_claimlegionprivilege")
+    .register("evotower_claimlegiontask", { taskId: 1 })
     .register("mergebox_getinfo")
     .register("mergebox_claimfreeenergy")
     .register("mergebox_openbox")
@@ -299,6 +302,7 @@ export function registerDefaultCommands(reg) {
     // 升星相关
     .register("hero_heroupgradestar")
     .register("book_upgrade")
+    .register("book_upgradeartifact")
     .register("book_claimpointreward")
 
     // 排名相关
@@ -316,6 +320,9 @@ export function registerDefaultCommands(reg) {
       goodsIndex: 0,
       buyNum: 1,
     })
+    .register("activity_commonbuygoods", { goodsId: 0 })
+    .register("activity_getactegameinfo", { actId: 0 })
+    .register("activity_actegamestageclaim", { actId: 0 })
     .register("activity_recyclewarorderrewardclaim")
     .register("legion_getpayloadtask")
     .register("legion_getpayloadkillrecord")
@@ -396,6 +403,14 @@ export function registerDefaultCommands(reg) {
     // 盐杯竞猜
     .register("saltcup26_getbetinfo")
     .register("saltcup26_placebet", { matchId: "", pick: 0 })
+
+    // 比赛房间预约（预约奖励由游戏邮件发放，不在助手内领取）
+    .register("pkroom_appoint")
+
+    // 逐鹿盐山竞猜
+    .register("apex_getroleinfo")
+    .register("apex_getguesslist", { scheduleId: 0, idx: 0 })
+    .register("apex_guess", { teamId: "" })
 
     // 换皮闯关领奖
     .register("activity_startactegame", { actId: 0 });
@@ -1038,7 +1053,7 @@ export class XyzwWebSocketClient {
           errorCodeMap[packet.code] || packet.hint || "未知错误";
 
         promiseData.reject(
-          new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
+          new Error(formatServerErrorMessage(packet.code, errorDesc)),
         );
       }
       return;
@@ -1055,6 +1070,9 @@ export class XyzwWebSocketClient {
       fight_startpvpresp: "fight_startpvp",
       activity_getresp: "activity_get",
       activity_buystoregoodsresp: "activity_buystoregoods",
+      activity_commonbuygoodsresp: "activity_commonbuygoods",
+      activity_getactegameinforesp: "activity_getactegameinfo",
+      activity_actegamestageclaimresp: "activity_actegamestageclaim",
       collection_goodslistresp: "collection_goodslist",
       collection_claimfreerewardresp: "collection_claimfreereward",
       legion_getarearankresp: "legion_getarearank",
@@ -1096,6 +1114,8 @@ export class XyzwWebSocketClient {
       mergebox_claimcostprogressresp: "mergebox_claimcostprogress",
       mergebox_claimmergeprogressresp: "mergebox_claimmergeprogress",
       evotower_claimtaskresp: "evotower_claimtask",
+      evotower_claimlegionprivilegeresp: "evotower_claimlegionprivilege",
+      evotower_claimlegiontaskresp: "evotower_claimlegiontask",
       item_openpackresp: "item_openpack",
       equipment_quenchresp: "equipment_quench",
       rank_getserverrankresp: "rank_getserverrank",
@@ -1124,6 +1144,7 @@ export class XyzwWebSocketClient {
       hero_heroupgradelevelresp: "hero_heroupgradelevel",
       hero_heroupgradeorderresp: "hero_heroupgradeorder",
       book_upgraderesp: "book_upgrade",
+      book_upgradeartifactresp: "book_upgradeartifact",
       book_claimpointrewardresp: "book_claimpointreward",
       // 军团信息
       legion_getinforesp: "legion_getinfo",
@@ -1150,6 +1171,10 @@ export class XyzwWebSocketClient {
       // 盐杯竞猜响应映射
       saltcup26_getbetinforesp: "saltcup26_getbetinfo",
       saltcup26_placebetresp: "saltcup26_placebet",
+      pkroom_appointresp: "pkroom_appoint",
+      apex_getroleinforesp: "apex_getroleinfo",
+      apex_getguesslistresp: "apex_getguesslist",
+      apex_guessresp: "apex_guess",
       activity_takeegamerewardresp: "activity_startactegame",
       // 换皮闯关相关响应映射
       towers_getinforesp: "towers_getinfo",
@@ -1221,7 +1246,7 @@ export class XyzwWebSocketClient {
             errorCodeMap[packet.code] || packet.hint || "未知错误";
 
           promiseData.reject(
-            new Error(`服务器错误: ${packet.code} - ${errorDesc}`),
+            new Error(formatServerErrorMessage(packet.code, errorDesc)),
           );
         }
         break;

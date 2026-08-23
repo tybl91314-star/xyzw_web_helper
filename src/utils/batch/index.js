@@ -25,3 +25,5 @@ export { createTasksArena } from './tasksArena.js';
 export { createTasksStore } from './tasksStore.js';
 export { createTasksLegacy } from './tasksLegacy.js';
 export { createTasksFootball } from './tasksFootball.js';
+export { createTasksPKRoom } from './tasksPKRoom.js';
+export { createTasksApexGuess } from './tasksApexGuess.js';

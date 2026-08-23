@@ -5,6 +5,7 @@ import {
   deleteOldReadMails,
 } from "@/utils/batch/mailUtils";
 import { upgradeStarUntilBlocked } from "@/utils/batch/starUpgrade";
+import { isRateLimitError } from "@/utils/serverError";
 
 /**
  * 开箱、钓鱼、招募类任务
@@ -45,6 +46,24 @@ export function createTasksItem(deps) {
   const fishNames = { 1: "普通鱼竿", 2: "黄金鱼竿" };
 
   const heroIds = Object.keys(HERO_DICT).map(Number);
+
+  const getBookUpgradeTargets = async (tokenId) => {
+    const roleInfo = await tokenStore.sendMessageWithPromise(
+      tokenId,
+      "role_getroleinfo",
+      {},
+      5000,
+    );
+    const role = roleInfo?.role || roleInfo || {};
+    const fishIds = Object.keys(role.artifactBooks || {})
+      .map(Number)
+      .filter((id) => Number.isInteger(id) && id > 0);
+
+    return [
+      ...heroIds.map((id) => ({ id, type: "英雄" })),
+      ...fishIds.map((id) => ({ id, type: "鱼灵" })),
+    ];
+  };
 
   /**
    * 批量英雄升星
@@ -93,6 +112,16 @@ export function createTasksItem(deps) {
                 message: `${token.name} 英雄ID:${heroId} 升星成功 (第${count}次)`,
                 type: "success",
               }),
+            onRetry: (error, retryCount, retryDelay) => {
+              const limited = isRateLimitError(error);
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: limited
+                  ? `${token.name} 英雄ID:${heroId} 触发服务器限流，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`
+                  : `${token.name} 英雄ID:${heroId} 请求或连接异常，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`,
+                type: "warning",
+              });
+            },
             waitAfterSuccess: () =>
               new Promise((resolve) =>
                 setTimeout(resolve, delayConfig.action),
@@ -101,9 +130,12 @@ export function createTasksItem(deps) {
 
           if (result.abortAccount) {
             abortRemainingHeroes = true;
+            const limited = isRateLimitError(result.error);
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 升星遇到限流或连接异常，已停止该账号后续升星：${result.error?.message || result.error}`,
+              message: limited
+                ? `${token.name} 连续3次触发服务器限流，已停止该账号后续升星：${result.error?.message || result.error}`
+                : `${token.name} 请求或连接异常连续失败，已停止该账号后续升星：${result.error?.message || result.error}`,
               type: "warning",
             });
           }
@@ -139,6 +171,163 @@ export function createTasksItem(deps) {
   };
 
   /**
+   * 批量鱼灵升星
+   *
+   * 游戏会在切换阵容时自动合并同类鱼灵并完成可用升星。这里临时切换到
+   * 另一个已解锁阵容，再恢复用户原来的阵容，避免依赖不存在的鱼灵升星协议。
+   */
+  const batchFishSpiritUpgrade = async () => {
+    if (selectedTokens.value.length === 0) return;
+
+    isRunning.value = true;
+    shouldStop.value = false;
+
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
+
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
+
+      tokenStatus.value[tokenId] = "running";
+      const token = tokens.value.find((t) => t.id === tokenId);
+      let originalTeamId = null;
+
+      try {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 开始鱼灵升星: ${token.name} ===`,
+          type: "info",
+        });
+
+        await ensureConnection(tokenId);
+
+        const teamResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "presetteam_getinfo",
+          {},
+          5000,
+        );
+        const presetTeamInfo = teamResult?.presetTeamInfo || {};
+        const teams = presetTeamInfo?.presetTeamInfo || {};
+        const teamIds = Object.keys(teams)
+          .filter((id) => /^\d+$/.test(id))
+          .map(Number)
+          .sort((a, b) => a - b);
+        originalTeamId = Number(presetTeamInfo.useTeamId || teamIds[0] || 1);
+        const temporaryTeamId = teamIds.find((id) => id !== originalTeamId);
+
+        if (!temporaryTeamId) {
+          throw new Error("当前账号没有可用于触发鱼灵升星的其他阵容槽位");
+        }
+
+        const beforeResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "role_getroleinfo",
+          {},
+          5000,
+        );
+        const beforeBooks = beforeResult?.role?.artifactBooks ||
+          beforeResult?.artifactBooks || {};
+        const beforeStars = Object.fromEntries(
+          Object.entries(beforeBooks).map(([fishId, book]) => [
+            fishId,
+            Number(book?.claimedStar || 0),
+          ]),
+        );
+
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "presetteam_saveteam",
+          { teamId: temporaryTeamId },
+          5000,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "presetteam_saveteam",
+          { teamId: originalTeamId },
+          5000,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
+
+        const afterResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "role_getroleinfo",
+          {},
+          5000,
+        );
+        const afterBooks = afterResult?.role?.artifactBooks ||
+          afterResult?.artifactBooks || {};
+        const upgrades = Object.entries(afterBooks)
+          .map(([fishId, book]) => {
+            const beforeStar = Number(beforeStars[fishId] || 0);
+            const afterStar = Number(book?.claimedStar || 0);
+            return { fishId, beforeStar, afterStar };
+          })
+          .filter((item) => item.afterStar > item.beforeStar);
+
+        if (upgrades.length > 0) {
+          upgrades.forEach(({ fishId, beforeStar, afterStar }) => {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 鱼灵ID:${fishId} 已从 ${beforeStar} 星升至 ${afterStar} 星`,
+              type: "success",
+            });
+          });
+        } else {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已完成鱼灵自动合并，当前没有可继续升星的鱼灵`,
+            type: "info",
+          });
+        }
+
+        tokenStatus.value[tokenId] = "completed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} === 鱼灵升星完成，已恢复阵容${originalTeamId} ===`,
+          type: "success",
+        });
+      } catch (error) {
+        console.error(error);
+        tokenStatus.value[tokenId] = "failed";
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token?.name || tokenId} 鱼灵升星失败: ${error.message}`,
+          type: "error",
+        });
+
+        if (originalTeamId) {
+          try {
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "presetteam_saveteam",
+              { teamId: originalTeamId },
+              5000,
+            );
+          } catch (restoreError) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token?.name || tokenId} 恢复阵容${originalTeamId}失败: ${restoreError.message}`,
+              type: "error",
+            });
+          }
+        }
+      } finally {
+        tokenStore.closeWebSocketConnection(tokenId);
+        releaseConnectionSlot();
+      }
+    });
+
+    await Promise.all(taskPromises);
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量鱼灵升星结束");
+  };
+
+  /**
    * 批量图鉴升星
    */
   const batchBookUpgrade = async () => {
@@ -166,25 +355,52 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        let abortRemainingHeroes = false;
-        for (const heroId of heroIds) {
+        const bookTargets = await getBookUpgradeTargets(tokenId);
+        const fishCount = bookTargets.filter(
+          (target) => target.type === "鱼灵",
+        ).length;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 已读取图鉴：英雄 ${heroIds.length} 个，鱼灵 ${fishCount} 个`,
+          type: "info",
+        });
+
+        let abortRemainingBooks = false;
+        const upgradedCount = { 英雄: 0, 鱼灵: 0 };
+        for (const target of bookTargets) {
           if (shouldStop.value) break;
 
           const result = await upgradeStarUntilBlocked({
             shouldStop: () => shouldStop.value,
-            sendUpgrade: () =>
-              tokenStore.sendMessageWithPromise(
+            sendUpgrade: () => {
+              const isArtifact = target.type === "鱼灵";
+              return tokenStore.sendMessageWithPromise(
                 tokenId,
-                "book_upgrade",
-                { heroId },
+                isArtifact ? "book_upgradeartifact" : "book_upgrade",
+                isArtifact
+                  ? { artifactId: target.id }
+                  : { heroId: target.id },
                 5000,
-              ),
-            onSuccess: (count) =>
+              );
+            },
+            onSuccess: (count) => {
+              upgradedCount[target.type]++;
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 英雄ID:${heroId} 图鉴升星成功 (第${count}次)`,
+                message: `${token.name} ${target.type}ID:${target.id} 图鉴升星成功 (第${count}次)`,
                 type: "success",
-              }),
+              });
+            },
+            onRetry: (error, retryCount, retryDelay) => {
+              const limited = isRateLimitError(error);
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: limited
+                  ? `${token.name} ${target.type}ID:${target.id} 图鉴升星触发服务器限流，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`
+                  : `${token.name} ${target.type}ID:${target.id} 图鉴升星请求或连接异常，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`,
+                type: "warning",
+              });
+            },
             waitAfterSuccess: () =>
               new Promise((resolve) =>
                 setTimeout(resolve, delayConfig.action),
@@ -192,14 +408,17 @@ export function createTasksItem(deps) {
           });
 
           if (result.abortAccount) {
-            abortRemainingHeroes = true;
+            abortRemainingBooks = true;
+            const limited = isRateLimitError(result.error);
             addLog({
               time: new Date().toLocaleTimeString(),
-              message: `${token.name} 图鉴升星遇到限流或连接异常，已停止该账号后续升星：${result.error?.message || result.error}`,
+              message: limited
+                ? `${token.name} 图鉴升星连续3次触发服务器限流，已停止该账号后续升星：${result.error?.message || result.error}`
+                : `${token.name} 图鉴升星请求或连接异常连续失败，已停止该账号后续升星：${result.error?.message || result.error}`,
               type: "warning",
             });
           }
-          if (abortRemainingHeroes) {
+          if (abortRemainingBooks) {
             break;
           }
         }
@@ -207,7 +426,7 @@ export function createTasksItem(deps) {
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} === 图鉴升星完成 ===`,
+          message: `${token.name} === 图鉴升星完成：英雄 ${upgradedCount.英雄} 次，鱼灵 ${upgradedCount.鱼灵} 次 ===`,
           type: "success",
         });
       } catch (error) {
@@ -1579,6 +1798,7 @@ export function createTasksItem(deps) {
     batchFish,
     batchRecruit,
     batchHeroUpgrade,
+    batchFishSpiritUpgrade,
     batchBookUpgrade,
     batchClaimStarRewards,
     batchMarkMailRead,

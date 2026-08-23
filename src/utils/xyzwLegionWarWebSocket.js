@@ -4,6 +4,7 @@
  */
  import { bonProtocol, g_utils } from './bonProtocol.js'
  import { wsLogger, gameLogger } from './logger.js'
+ import { formatServerErrorMessage } from './serverError.js'
  
  /** 为日志生成安全的 body 预览，避免控制台再次解析原始对象 */
  const formatBodyForLog = (body) => {
@@ -590,7 +591,7 @@
        if (packet.code === 0 || packet.code === undefined) {
          promiseData.resolve(responseBody || packet)
        } else {
-         promiseData.reject(new Error(`服务器错误: ${packet.code} - ${packet.hint || '未知错误'}`))
+         promiseData.reject(new Error(formatServerErrorMessage(packet.code, packet.hint)))
        }
        return
      }
@@ -692,7 +693,7 @@
          if (packet.code === 0 || packet.code === undefined) {
            promiseData.resolve(responseBody || packet)
          } else {
-           promiseData.reject(new Error(`服务器错误: ${packet.code} - ${packet.hint || '未知错误'}`))
+           promiseData.reject(new Error(formatServerErrorMessage(packet.code, packet.hint)))
          }
          break
        }
@@ -714,4 +715,3 @@
  
  /** 默认导出 */
  export default XyzwLegionWarWebSocketClient
- 

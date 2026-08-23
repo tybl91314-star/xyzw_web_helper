@@ -57,6 +57,8 @@ export const availableTasks = [
   { label: "一键竞技场补齐", value: "batchTopUpArena" },
   { label: "换皮闯关道具领取", value: "batchClaimFreeEnergy" },
   { label: "一键换皮闯关", value: "skinChallenge" },
+  { label: "比赛预约", value: "batchMatchAppointment" },
+  { label: "逐鹿盐山竞猜", value: "batchApexGuess" },
   { label: "一键购买四圣碎片", value: "legion_storebuygoods" },
   { label: "一键黑市采购", value: "store_purchase" },
   { label: "免费领取珍宝阁", value: "collection_claimfreereward" },

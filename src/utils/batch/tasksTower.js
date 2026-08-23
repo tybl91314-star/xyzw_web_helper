@@ -33,6 +33,21 @@ export function findSkinChallengeSupplyActivityId(result) {
   return namedEntry ? Number(namedEntry[0]) : null;
 }
 
+function findSkinChallengeEGameActivityId(result) {
+  const responseBody = result?.body ?? result;
+  const activityState = responseBody?.activity ?? responseBody;
+  const directId = Number(activityState?.actEGameInfo?.actId);
+  if (Number.isFinite(directId) && directId > 0) return directId;
+
+  const candidates = Object.values(activityState?.commonActivityInfo ?? {});
+  const eGameInfo = candidates.find((info) => {
+    const id = Number(info?.actId ?? info?.activityId ?? info?.id);
+    return Number.isFinite(id) && /闯关|寻宝|赛场/.test(JSON.stringify(info ?? {}));
+  });
+  const candidateId = Number(eGameInfo?.actId ?? eGameInfo?.activityId ?? eGameInfo?.id);
+  return Number.isFinite(candidateId) && candidateId > 0 ? candidateId : null;
+}
+
 /**
  * 创建爬塔类任务执行器
  * @param {Object} deps - 依赖项
@@ -60,6 +75,142 @@ export function createTasksTower(deps) {
 
   const wait = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  // 俱乐部特权由服务端按顺序逐档领取，一次请求只会领取一档。
+  // 连续请求直到服务端提示无可领项；任何失败都不能影响后续爬塔。
+  const claimEvoTowerClubPrivilege = async (tokenId, tokenName) => {
+    let claimedCount = 0;
+    for (let attempt = 0; attempt < 10; attempt++) {
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_claimlegionprivilege",
+          {},
+          3000,
+        );
+        claimedCount++;
+        await wait(250);
+      } catch (_) {
+        break;
+      }
+    }
+
+    if (claimedCount > 0) {
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 已领取怪异塔俱乐部特权 ${claimedCount} 档`,
+        type: "success",
+      });
+    }
+    return claimedCount;
+  };
+
+  // 合成前领取俱乐部目标奖励。根据服务端返回的俱乐部目标动态领取，
+  // 未达到条件或已经领取时服务端会拒绝，静默跳过即可。
+  const claimEvoTowerClubTaskRewards = async (tokenId, tokenName, evoTowerInfo) => {
+    const taskMap = evoTowerInfo?.evoTower?.legionTaskMap || {};
+    const claimMap = evoTowerInfo?.evoTower?.legionTaskClaimMap || {};
+    const taskIds = Object.keys(taskMap)
+      .map((taskId) => Number(taskId))
+      .filter((taskId) => Number.isInteger(taskId) && taskId > 0)
+      .sort((a, b) => a - b);
+    let claimedCount = 0;
+
+    for (const taskId of taskIds) {
+      if (claimMap[taskId] || claimMap[String(taskId)]) continue;
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_claimlegiontask",
+          { taskId },
+          2500,
+        );
+        claimedCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已领取怪异塔俱乐部目标奖励 ${taskId}`,
+          type: "success",
+        });
+        await wait(250);
+      } catch (_) {
+        // 未达成、已领取都属于正常状态，不影响后续合成。
+      }
+    }
+    return claimedCount;
+  };
+
+  // 10 层打完后会停在章节奖励/进入下一塔状态；该状态必须先结算，
+  // 否则 readyfight 会被服务器拒绝。
+  const settleEvoTowerChapter = async (tokenId, tokenName) => {
+    try {
+      await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "evotower_claimreward",
+        {},
+        4000,
+      );
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `${tokenName} 已领取怪异塔章节通关奖励并进入下一塔`,
+        type: "success",
+      });
+      await wait(500);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const getEvoTowerDailyTaskClaimMap = (evoTowerInfo) => {
+    const now = new Date();
+    const dateKey = `${String(now.getFullYear()).slice(-2)}${String(
+      now.getMonth() + 1,
+    ).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}`;
+    return evoTowerInfo?.evoTower?.taskClaimMap?.[dateKey] || {};
+  };
+
+  // 每日挑战有三档宝箱。每次刷新怪异塔数据后都检查一次，因此开始任务前
+  // 已经漏领的档位也会补领，后续新达到的档位同样不会错过。
+  const claimEvoTowerDailyChallengeRewards = async (
+    tokenId,
+    tokenName,
+    evoTowerInfo,
+    claimedTaskIds,
+  ) => {
+    const claimMap = getEvoTowerDailyTaskClaimMap(evoTowerInfo);
+    let claimedCount = 0;
+
+    for (const taskId of [1, 2, 3]) {
+      if (
+        claimedTaskIds.has(taskId) ||
+        claimMap[taskId] ||
+        claimMap[String(taskId)]
+      ) {
+        continue;
+      }
+
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "evotower_claimtask",
+          { taskId },
+          2500,
+        );
+        claimedTaskIds.add(taskId);
+        claimedCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已领取怪异塔每日挑战奖励第 ${taskId} 档`,
+          type: "success",
+        });
+        await wait(200);
+      } catch (_) {
+        // 尚未达到、已经领取或当日档位不存在都不影响后续爬塔。
+      }
+    }
+
+    return claimedCount;
+  };
 
   /**
    * 爬塔
@@ -189,7 +340,7 @@ export function createTasksTower(deps) {
             if (err.message && err.message.includes("200400")) {
               addLog({
                 time: new Date().toLocaleTimeString(),
-                message: `${token.name} 操作过快 (200400)，等待5秒后重试...`,
+                message: `${token.name} 触发服务器限流（200400，请求过于频繁），等待5秒后重试...`,
                 type: "warning",
               });
               await new Promise((r) => setTimeout(r, 5000));
@@ -376,13 +527,39 @@ export function createTasksTower(deps) {
           });
         }
 
+        const claimedDailyTaskIds = new Set();
+
         // 获取怪异塔信息
-        const evotowerinfo1 = await tokenStore.sendMessageWithPromise(
+        let evotowerinfo1 = await tokenStore.sendMessageWithPromise(
           tokenId,
           "evotower_getinfo",
           {},
           5000,
         );
+
+        // 开始爬塔前先领取俱乐部特权，并处理已经打完第 10 层、
+        // 正等待领取章节奖励/进入下一塔的状态。
+        await claimEvoTowerClubPrivilege(tokenId, token.name);
+        await claimEvoTowerDailyChallengeRewards(
+          tokenId,
+          token.name,
+          evotowerinfo1,
+          claimedDailyTaskIds,
+        );
+        if (await settleEvoTowerChapter(tokenId, token.name)) {
+          evotowerinfo1 = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "evotower_getinfo",
+            {},
+            5000,
+          );
+          await claimEvoTowerDailyChallengeRewards(
+            tokenId,
+            token.name,
+            evotowerinfo1,
+            claimedDailyTaskIds,
+          );
+        }
 
         let currentEnergy = evotowerinfo1?.evoTower?.energy;
 
@@ -439,36 +616,12 @@ export function createTasksTower(deps) {
               {},
               5000,
             );
-
-            // 检查并领取每日任务奖励
-            if (evotowerinfo2 && evotowerinfo2.evoTower && evotowerinfo2.evoTower.taskClaimMap) {
-                 const now = new Date();
-                 const year = now.getFullYear().toString().slice(2);
-                 const month = (now.getMonth() + 1).toString().padStart(2, '0');
-                 const day = now.getDate().toString().padStart(2, '0');
-                 const dateKey = `${year}${month}${day}`;
-                 
-                 const dailyTasks = evotowerinfo2.evoTower.taskClaimMap[dateKey] || {};
-                 const taskIds = [1, 2, 3];
-                 
-                 for (const taskId of taskIds) {
-                    if (!dailyTasks[taskId]) {
-                      await tokenStore.sendMessageWithPromise(
-                        tokenId,
-                        "evotower_claimtask",
-                        { taskId: taskId },
-                        2000
-                      ).then(() => {
-                         addLog({
-                            time: new Date().toLocaleTimeString(),
-                            message: `${token.name} 领取每日任务奖励 ${taskId} 成功`,
-                            type: "success",
-                         });
-                      }).catch(() => {});
-                      await new Promise(r => setTimeout(r, 200)); 
-                    }
-                 }
-            }
+            await claimEvoTowerDailyChallengeRewards(
+              tokenId,
+              token.name,
+              evotowerinfo2,
+              claimedDailyTaskIds,
+            );
 
             // 检查是否刚通关10层
             const towerId = evotowerinfo2?.evoTower?.towerId || 0;
@@ -506,6 +659,29 @@ export function createTasksTower(deps) {
               // 忽略刷新失败
             }
           } catch (err) {
+            // readyfight 在章节结算页会失败；先尝试领取通关奖励，
+            // 成功后继续循环，不把正常的换塔状态计作战斗失败。
+            if (await settleEvoTowerChapter(tokenId, token.name)) {
+              consecutiveFailures = 0;
+              try {
+                const settledInfo = await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "evotower_getinfo",
+                  {},
+                  5000,
+                );
+                currentEnergy = settledInfo?.evoTower?.energy || 0;
+                await claimEvoTowerDailyChallengeRewards(
+                  tokenId,
+                  token.name,
+                  settledInfo,
+                  claimedDailyTaskIds,
+                );
+              } catch (_) {
+                currentEnergy = 0;
+              }
+              continue;
+            }
             consecutiveFailures++;
             addLog({
               time: new Date().toLocaleTimeString(),
@@ -532,11 +708,37 @@ export function createTasksTower(deps) {
                 5000,
               );
               currentEnergy = evotowerinfoRefresh2?.evoTower?.energy || 0;
+              await claimEvoTowerDailyChallengeRewards(
+                tokenId,
+                token.name,
+                evotowerinfoRefresh2,
+                claimedDailyTaskIds,
+              );
             } catch (e) {
               // 忽略刷新失败
             }
           }
         }
+
+        // 即使最后一次战斗后没有再次进入循环，也做一次最终检查，确保刚刚
+        // 达成的每日挑战宝箱不会留到下一次运行才领取。
+        try {
+          const finalEvoTowerInfo = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "evotower_getinfo",
+            {},
+            5000,
+          );
+          await claimEvoTowerDailyChallengeRewards(
+            tokenId,
+            token.name,
+            finalEvoTowerInfo,
+            claimedDailyTaskIds,
+          );
+        } catch (_) {
+          // 最终补领检查失败不影响本次爬塔结果。
+        }
+
         if (Isswitching) {
           await tokenStore.sendMessageWithPromise(
             tokenId,
@@ -607,24 +809,78 @@ export function createTasksTower(deps) {
           {},
           10000,
         );
+        const eGameActivityId = findSkinChallengeEGameActivityId(activityResult);
         const supplyActivityId = findSkinChallengeSupplyActivityId(activityResult);
-        if (!supplyActivityId) {
-          throw new Error("未找到当前换皮闯关对应的赛场补给活动");
+        let claimedStageCount = 0;
+        let claimedFreeSupply = false;
+
+        // 右下角累计发射次数奖励：服务端一次领取当前一档，领取后重新读取
+        // 下一档状态，直到没有已达成的档次为止。
+        if (eGameActivityId) {
+          for (let attempt = 0; attempt < 20; attempt++) {
+            try {
+              const infoResult = await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_getactegameinfo",
+                { actId: eGameActivityId },
+                5000,
+              );
+              const eGame = infoResult?.actEGame ?? infoResult?.body?.actEGame ??
+                infoResult?.activity?.actEGame;
+              if (Number(eGame?.stageId) === -1) break;
+
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "activity_actegamestageclaim",
+                { actId: eGameActivityId },
+                5000,
+              );
+              claimedStageCount++;
+              await wait(250);
+            } catch (_) {
+              break;
+            }
+          }
         }
 
-        const claimResult = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "activity_buystoregoods",
-          { activityId: supplyActivityId, goodsIndex: 0, buyNum: 1 },
-          10000,
-        );
-        if (claimResult?.error) throw new Error(claimResult.error);
+        // 赛场补给属于通用活动商品。客户端配置明确规定免费商品为该活动
+        // rank=1 的商品，商品 ID 规则为 activityId * 10 + 1。
+        if (supplyActivityId) {
+          try {
+            const freeGoodsId = supplyActivityId * 10 + 1;
+            await tokenStore.sendMessageWithPromise(
+              tokenId,
+              "activity_commonbuygoods",
+              { goodsId: freeGoodsId },
+              5000,
+            );
+            claimedFreeSupply = true;
+          } catch (_) {
+            // 已领取或当前不可领属于正常状态，不能影响累计档次奖励。
+          }
+        }
 
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 赛场补给免费道具领取成功（活动 ${supplyActivityId}）`,
-          type: "success",
-        });
+        if (claimedStageCount > 0) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已领取累计发射奖励 ${claimedStageCount} 档`,
+            type: "success",
+          });
+        }
+        if (claimedFreeSupply) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已领取赛场补给免费道具`,
+            type: "success",
+          });
+        }
+        if (claimedStageCount === 0 && !claimedFreeSupply) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 当前没有可领取的换皮闯关道具`,
+            type: "info",
+          });
+        }
 
         tokenStatus.value[tokenId] = "completed";
       } catch (error) {
@@ -1086,6 +1342,19 @@ export function createTasksTower(deps) {
 
         await ensureConnection(tokenId);
 
+        // 合成前先领取怪异塔俱乐部目标奖励。
+        try {
+          const evoTowerInfo = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "evotower_getinfo",
+            {},
+            5000,
+          );
+          await claimEvoTowerClubTaskRewards(tokenId, token.name, evoTowerInfo);
+        } catch (_) {
+          // 未开启怪异塔等情况不影响后续合成。
+        }
+
         let loopCount = 0;
         const MAX_LOOPS = 20;
 
@@ -1107,6 +1376,46 @@ export function createTasksTower(deps) {
                type: "warning",
              });
              break;
+          }
+
+          if (loopCount === 1) {
+            // 每 3 小时生成的合成道具（最多存 10 个）。
+            if (Number(infoRes.mergeBox.freeEnergy || 0) > 0) {
+              try {
+                await tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  "mergebox_claimfreeenergy",
+                  { actType: 1 },
+                  5000,
+                );
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} 已领取怪异塔合成定时道具`,
+                  type: "success",
+                });
+                await wait(300);
+              } catch (_) {
+                // 状态可能已由其他客户端更新，继续执行合成。
+              }
+            }
+
+            // 领取当前已经达到条件的累计消耗奖励。
+            try {
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "mergebox_claimcostprogress",
+                { actType: 1 },
+                5000,
+              );
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 已领取怪异塔合成累计消耗奖励`,
+                type: "success",
+              });
+              await wait(300);
+            } catch (_) {
+              // 当前没有可领取奖励属于正常状态。
+            }
           }
 
           // 领取合成奖励
