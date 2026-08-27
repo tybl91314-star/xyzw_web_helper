@@ -355,72 +355,89 @@ export function createTasksItem(deps) {
 
         await ensureConnection(tokenId);
 
-        const bookTargets = await getBookUpgradeTargets(tokenId);
-        const fishCount = bookTargets.filter(
-          (target) => target.type === "鱼灵",
-        ).length;
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 已读取图鉴：英雄 ${heroIds.length} 个，鱼灵 ${fishCount} 个`,
-          type: "info",
-        });
-
         let abortRemainingBooks = false;
         const upgradedCount = { 英雄: 0, 鱼灵: 0 };
-        for (const target of bookTargets) {
-          if (shouldStop.value) break;
+        let scanRound = 0;
 
-          const result = await upgradeStarUntilBlocked({
-            shouldStop: () => shouldStop.value,
-            sendUpgrade: () => {
-              const isArtifact = target.type === "鱼灵";
-              return tokenStore.sendMessageWithPromise(
-                tokenId,
-                isArtifact ? "book_upgradeartifact" : "book_upgrade",
-                isArtifact
-                  ? { artifactId: target.id }
-                  : { heroId: target.id },
-                5000,
-              );
-            },
-            onSuccess: (count) => {
-              upgradedCount[target.type]++;
-              addLog({
-                time: new Date().toLocaleTimeString(),
-                message: `${token.name} ${target.type}ID:${target.id} 图鉴升星成功 (第${count}次)`,
-                type: "success",
-              });
-            },
-            onRetry: (error, retryCount, retryDelay) => {
-              const limited = isRateLimitError(error);
+        // 一次升星可能会改变后续图鉴项的可升级状态。完整扫描一轮后只要
+        // 仍有成功项，就重新读取角色图鉴并再扫一轮，直到整轮零成功。
+        while (!shouldStop.value && !abortRemainingBooks) {
+          scanRound++;
+          const bookTargets = await getBookUpgradeTargets(tokenId);
+          if (scanRound === 1) {
+            const fishCount = bookTargets.filter(
+              (target) => target.type === "鱼灵",
+            ).length;
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 已读取图鉴：英雄 ${heroIds.length} 个，鱼灵 ${fishCount} 个`,
+              type: "info",
+            });
+          }
+
+          let roundSuccessCount = 0;
+          for (const target of bookTargets) {
+            if (shouldStop.value) break;
+
+            const result = await upgradeStarUntilBlocked({
+              shouldStop: () => shouldStop.value,
+              sendUpgrade: () => {
+                const isArtifact = target.type === "鱼灵";
+                return tokenStore.sendMessageWithPromise(
+                  tokenId,
+                  isArtifact ? "book_upgradeartifact" : "book_upgrade",
+                  isArtifact
+                    ? { artifactId: target.id }
+                    : { heroId: target.id },
+                  5000,
+                );
+              },
+              onSuccess: (count) => {
+                upgradedCount[target.type]++;
+                roundSuccessCount++;
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: `${token.name} ${target.type}ID:${target.id} 图鉴升星成功 (第${count}次)`,
+                  type: "success",
+                });
+              },
+              onRetry: (error, retryCount, retryDelay) => {
+                const limited = isRateLimitError(error);
+                addLog({
+                  time: new Date().toLocaleTimeString(),
+                  message: limited
+                    ? `${token.name} ${target.type}ID:${target.id} 图鉴升星触发服务器限流，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`
+                    : `${token.name} ${target.type}ID:${target.id} 图鉴升星请求或连接异常，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`,
+                  type: "warning",
+                });
+              },
+              waitAfterSuccess: () =>
+                new Promise((resolve) =>
+                  setTimeout(resolve, delayConfig.action),
+                ),
+            });
+
+            if (result.abortAccount) {
+              abortRemainingBooks = true;
+              const limited = isRateLimitError(result.error);
               addLog({
                 time: new Date().toLocaleTimeString(),
                 message: limited
-                  ? `${token.name} ${target.type}ID:${target.id} 图鉴升星触发服务器限流，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`
-                  : `${token.name} ${target.type}ID:${target.id} 图鉴升星请求或连接异常，${retryDelay / 1000}秒后重试 (${retryCount}/2)：${error?.message || error}`,
+                  ? `${token.name} 图鉴升星连续3次触发服务器限流，已停止该账号后续升星：${result.error?.message || result.error}`
+                  : `${token.name} 图鉴升星请求或连接异常连续失败，已停止该账号后续升星：${result.error?.message || result.error}`,
                 type: "warning",
               });
-            },
-            waitAfterSuccess: () =>
-              new Promise((resolve) =>
-                setTimeout(resolve, delayConfig.action),
-              ),
-          });
+              break;
+            }
+          }
 
-          if (result.abortAccount) {
-            abortRemainingBooks = true;
-            const limited = isRateLimitError(result.error);
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: limited
-                ? `${token.name} 图鉴升星连续3次触发服务器限流，已停止该账号后续升星：${result.error?.message || result.error}`
-                : `${token.name} 图鉴升星请求或连接异常连续失败，已停止该账号后续升星：${result.error?.message || result.error}`,
-              type: "warning",
-            });
-          }
-          if (abortRemainingBooks) {
-            break;
-          }
+          if (roundSuccessCount === 0 || shouldStop.value) break;
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 图鉴第 ${scanRound} 轮仍升星 ${roundSuccessCount} 次，重新读取后继续检查`,
+            type: "info",
+          });
+          await new Promise((resolve) => setTimeout(resolve, delayConfig.action));
         }
 
         tokenStatus.value[tokenId] = "completed";

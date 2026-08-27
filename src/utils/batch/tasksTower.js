@@ -2,7 +2,7 @@ import { getTowerActId } from "../towerActId.js";
 
 /**
  * 爬塔类任务
- * 包含: climbTower, climbWeirdTower, batchClaimFreeEnergy
+ * 包含: climbTower, climbWeirdTower, skinChallenge
  */
 import { normalizeWeirdTowerMaxClimb } from "../towerClimbLimit.js";
 
@@ -75,6 +75,152 @@ export function createTasksTower(deps) {
 
   const wait = (milliseconds) =>
     new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+  const launchSkinChallengeItems = async (tokenId, tokenName, actId) => {
+    let launchedCount = 0;
+    while (!shouldStop.value) {
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_startactegame",
+          { actId },
+          5000,
+        );
+        launchedCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 活动 ${actId} 发射道具第 ${launchedCount} 次`,
+          type: "success",
+        });
+        await wait(300);
+      } catch (_) {
+        break;
+      }
+    }
+    return launchedCount;
+  };
+
+  const claimSkinChallengeStageRewards = async (
+    tokenId,
+    tokenName,
+    actId,
+  ) => {
+    let claimedCount = 0;
+    while (!shouldStop.value) {
+      try {
+        const infoResult = await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_getactegameinfo",
+          { actId },
+          5000,
+        );
+        const eGame =
+          infoResult?.actEGame ??
+          infoResult?.body?.actEGame ??
+          infoResult?.activity?.actEGame;
+        if (Number(eGame?.stageId) === -1) break;
+
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_actegamestageclaim",
+          { actId },
+          5000,
+        );
+        claimedCount++;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已领取累计发射奖励第 ${claimedCount} 档`,
+          type: "success",
+        });
+        await wait(250);
+      } catch (_) {
+        break;
+      }
+    }
+    return claimedCount;
+  };
+
+  /**
+   * 结算换皮闯关的全部道具链路：免费补给、发射现有道具、累计档次奖励。
+   * 档次奖励可能再次产出发射道具，因此必须循环到完整一轮没有任何进展。
+   */
+  const settleSkinChallengeItems = async (
+    tokenId,
+    tokenName,
+    fallbackActivityId,
+  ) => {
+    let activityResult = null;
+    try {
+      activityResult = await tokenStore.sendMessageWithPromise(
+        tokenId,
+        "activity_get",
+        {},
+        10000,
+      );
+    } catch (_) {
+      // 活动总览读取失败时仍可用闯关活动 ID 发射现有道具。
+    }
+
+    const detectedEGameId = findSkinChallengeEGameActivityId(activityResult);
+    const eGameActivityId = detectedEGameId || Number(fallbackActivityId);
+    const supplyActivityId = findSkinChallengeSupplyActivityId(activityResult);
+    let claimedFreeSupply = false;
+
+    // 免费补给只需尝试一次；已领取或当前不可领是正常状态。
+    if (supplyActivityId) {
+      try {
+        await tokenStore.sendMessageWithPromise(
+          tokenId,
+          "activity_commonbuygoods",
+          { goodsId: supplyActivityId * 10 + 1 },
+          5000,
+        );
+        claimedFreeSupply = true;
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${tokenName} 已领取赛场补给免费道具`,
+          type: "success",
+        });
+        await wait(250);
+      } catch (_) {
+        // 已领取或未开放不能影响后续发射与档次奖励。
+      }
+    }
+
+    if (!Number.isFinite(eGameActivityId) || eGameActivityId <= 0) {
+      return { launched: 0, claimedStages: 0, claimedFreeSupply };
+    }
+
+    let totalLaunched = 0;
+    let totalClaimedStages = 0;
+    while (!shouldStop.value) {
+      const launched = await launchSkinChallengeItems(
+        tokenId,
+        tokenName,
+        eGameActivityId,
+      );
+      const claimedStages = await claimSkinChallengeStageRewards(
+        tokenId,
+        tokenName,
+        eGameActivityId,
+      );
+      totalLaunched += launched;
+      totalClaimedStages += claimedStages;
+
+      if (launched === 0 && claimedStages === 0) break;
+    }
+
+    addLog({
+      time: new Date().toLocaleTimeString(),
+      message: `${tokenName} 换皮闯关道具结算完成：发射 ${totalLaunched} 次，领取累计奖励 ${totalClaimedStages} 档${claimedFreeSupply ? "，已领取免费补给" : ""}`,
+      type: "info",
+    });
+    return {
+      launched: totalLaunched,
+      claimedStages: totalClaimedStages,
+      claimedFreeSupply,
+    };
+  };
 
   // 俱乐部特权由服务端按顺序逐档领取，一次请求只会领取一档。
   // 连续请求直到服务端提示无可领项；任何失败都不能影响后续爬塔。
@@ -779,136 +925,6 @@ export function createTasksTower(deps) {
     message.success("批量爬怪异塔结束");
   };
 
-  /** 换皮闯关道具领取 */
-  const batchClaimFreeEnergy = async () => {
-    if (selectedTokens.value.length === 0) return;
-    isRunning.value = true;
-    shouldStop.value = false;
-
-    selectedTokens.value.forEach((id) => {
-      tokenStatus.value[id] = "waiting";
-    });
-
-    const taskPromises = selectedTokens.value.map(async (tokenId) => {
-      if (shouldStop.value) return;
-      tokenStatus.value[tokenId] = "running";
-
-      const token = tokens.value.find((t) => t.id === tokenId);
-      try {
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== 开始领取换皮闯关道具: ${token.name} ===`,
-          type: "info",
-        });
-
-        await ensureConnection(tokenId);
-
-        const activityResult = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "activity_get",
-          {},
-          10000,
-        );
-        const eGameActivityId = findSkinChallengeEGameActivityId(activityResult);
-        const supplyActivityId = findSkinChallengeSupplyActivityId(activityResult);
-        let claimedStageCount = 0;
-        let claimedFreeSupply = false;
-
-        // 右下角累计发射次数奖励：服务端一次领取当前一档，领取后重新读取
-        // 下一档状态，直到没有已达成的档次为止。
-        if (eGameActivityId) {
-          for (let attempt = 0; attempt < 20; attempt++) {
-            try {
-              const infoResult = await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "activity_getactegameinfo",
-                { actId: eGameActivityId },
-                5000,
-              );
-              const eGame = infoResult?.actEGame ?? infoResult?.body?.actEGame ??
-                infoResult?.activity?.actEGame;
-              if (Number(eGame?.stageId) === -1) break;
-
-              await tokenStore.sendMessageWithPromise(
-                tokenId,
-                "activity_actegamestageclaim",
-                { actId: eGameActivityId },
-                5000,
-              );
-              claimedStageCount++;
-              await wait(250);
-            } catch (_) {
-              break;
-            }
-          }
-        }
-
-        // 赛场补给属于通用活动商品。客户端配置明确规定免费商品为该活动
-        // rank=1 的商品，商品 ID 规则为 activityId * 10 + 1。
-        if (supplyActivityId) {
-          try {
-            const freeGoodsId = supplyActivityId * 10 + 1;
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "activity_commonbuygoods",
-              { goodsId: freeGoodsId },
-              5000,
-            );
-            claimedFreeSupply = true;
-          } catch (_) {
-            // 已领取或当前不可领属于正常状态，不能影响累计档次奖励。
-          }
-        }
-
-        if (claimedStageCount > 0) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 已领取累计发射奖励 ${claimedStageCount} 档`,
-            type: "success",
-          });
-        }
-        if (claimedFreeSupply) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 已领取赛场补给免费道具`,
-            type: "success",
-          });
-        }
-        if (claimedStageCount === 0 && !claimedFreeSupply) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 当前没有可领取的换皮闯关道具`,
-            type: "info",
-          });
-        }
-
-        tokenStatus.value[tokenId] = "completed";
-      } catch (error) {
-        console.error(error);
-        tokenStatus.value[tokenId] = "failed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 换皮闯关道具领取失败: ${error.message || "未知错误"}`,
-          type: "error",
-        });
-      } finally {
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
-      }
-    });
-
-    await Promise.all(taskPromises);
-
-    isRunning.value = false;
-    currentRunningTokenId.value = null;
-    message.success("换皮闯关道具领取结束");
-  };
-
   /**
    * 换皮闯关
    */
@@ -1105,39 +1121,16 @@ export function createTasksTower(deps) {
             }
         }
 
-        // 闯关完成后结算活动奖励（该活动命令同时会使用现有发射道具）。
-        // 免费补给由独立的“换皮闯关道具领取”功能处理，避免闯关流程重复请求。
+        // 闯关完成后结算全部道具：先领取免费补给，再发射现有道具，
+        // 然后领取累计档次奖励；档次奖励若产生新道具则继续循环。
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 闯关结束，开始结算活动奖励`,
+          message: `${token.name} 闯关结束，开始结算全部道具与活动奖励`,
           type: "info",
         });
-        let rewardClaimCount = 0;
         const baseActId = Number(towerData?.actId || getTowerActId());
         const rewardActId = baseActId % 10 === 1 ? baseActId + 1 : baseActId;
-        try {
-          while (!shouldStop.value) {
-            await tokenStore.sendMessageWithPromise(
-              tokenId,
-              "activity_startactegame",
-              { actId: rewardActId },
-              5000,
-            );
-            rewardClaimCount += 1;
-            addLog({
-              time: new Date().toLocaleTimeString(),
-              message: `${token.name} 活动 ${rewardActId} 领取奖励第 ${rewardClaimCount} 次`,
-              type: "success",
-            });
-            await wait(300);
-          }
-        } catch {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 活动 ${rewardActId} 奖励结算完成（共 ${rewardClaimCount} 次）`,
-            type: "info",
-          });
-        }
+        await settleSkinChallengeItems(tokenId, token.name, rewardActId);
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
@@ -1317,9 +1310,12 @@ export function createTasksTower(deps) {
   };
 
   /**
-   * 批量合成
+   * 批量使用怪异塔道具并合成。
+   *
+   * 每轮先把当前能够使用的道具尽量用完，再执行合成。合成结束后必须
+   * 重新读取服务端剩余道具数：仍有道具就进入下一轮，为 0 才正常结束。
    */
-  const batchMergeItems = async () => {
+  const batchWeirdTowerItemMerge = async () => {
     if (selectedTokens.value.length === 0) return;
     isRunning.value = true;
     shouldStop.value = false;
@@ -1336,7 +1332,7 @@ export function createTasksTower(deps) {
       try {
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== 开始一键合成: ${token.name} ===`,
+          message: `=== 开始怪异塔道具合成: ${token.name} ===`,
           type: "info",
         });
 
@@ -1355,11 +1351,86 @@ export function createTasksTower(deps) {
           // 未开启怪异塔等情况不影响后续合成。
         }
 
-        let loopCount = 0;
-        const MAX_LOOPS = 20;
+        let initialRewardsHandled = false;
+        let settlementRound = 0;
+        let totalUsedCount = 0;
+        let totalMergeCount = 0;
+        const MAX_SETTLEMENT_ROUNDS = 30;
 
-        while (loopCount < MAX_LOOPS && !shouldStop.value) {
-          loopCount++;
+        while (settlementRound < MAX_SETTLEMENT_ROUNDS && !shouldStop.value) {
+          settlementRound++;
+          let usedCount = 0;
+
+          // 先使用当前全部可用道具。格子已满等情况会转入合成，合成后再试。
+          const useInfoRes = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "mergebox_getinfo",
+            { actType: 1 },
+            5000,
+          );
+          const useTowerInfoRes = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "evotower_getinfo",
+            {},
+            5000,
+          );
+          let costTotalCnt = Number(useInfoRes?.mergeBox?.costTotalCnt || 0);
+          let lotteryLeftCnt = Number(
+            useTowerInfoRes?.evoTower?.lotteryLeftCnt || 0,
+          );
+
+          while (lotteryLeftCnt > 0 && !shouldStop.value) {
+            const pos = costTotalCnt < 2
+              ? { gridX: 4, gridY: 5 }
+              : costTotalCnt < 102
+                ? { gridX: 7, gridY: 3 }
+                : { gridX: 6, gridY: 3 };
+            try {
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "mergebox_openbox",
+                { actType: 1, pos },
+                5000,
+              );
+            } catch (error) {
+              addLog({
+                time: new Date().toLocaleTimeString(),
+                message: `${token.name} 当前道具暂时无法继续使用，先尝试合成`,
+                type: "info",
+              });
+              break;
+            }
+            costTotalCnt++;
+            lotteryLeftCnt--;
+            usedCount++;
+            totalUsedCount++;
+            await wait(500);
+          }
+
+          if (usedCount > 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 第 ${settlementRound} 轮使用怪异塔道具 ${usedCount} 个`,
+              type: "success",
+            });
+            try {
+              await tokenStore.sendMessageWithPromise(
+                tokenId,
+                "mergebox_claimcostprogress",
+                { actType: 1 },
+                5000,
+              );
+            } catch (_) {
+              // 当前没有累计使用奖励属于正常状态。
+            }
+          }
+
+          let loopCount = 0;
+          let mergeCount = 0;
+          const MAX_MERGE_LOOPS = 20;
+
+          while (loopCount < MAX_MERGE_LOOPS && !shouldStop.value) {
+            loopCount++;
 
           // 获取当前信息
           const infoRes = await tokenStore.sendMessageWithPromise(
@@ -1378,7 +1449,8 @@ export function createTasksTower(deps) {
              break;
           }
 
-          if (loopCount === 1) {
+          if (!initialRewardsHandled) {
+            initialRewardsHandled = true;
             // 每 3 小时生成的合成道具（最多存 10 个）。
             if (Number(infoRes.mergeBox.freeEnergy || 0) > 0) {
               try {
@@ -1521,6 +1593,8 @@ export function createTasksTower(deps) {
               { actType: 1 },
               10000 
             );
+            mergeCount++;
+            totalMergeCount++;
             await new Promise((res) => setTimeout(res, 1500));
           } else {
             // 8级以下手动合成
@@ -1533,29 +1607,79 @@ export function createTasksTower(deps) {
                 const source = group.shift();
                 const target = group.shift();
 
-                await tokenStore.sendMessageWithPromise(
-                  tokenId,
-                  "mergebox_mergeitem",
-                  {
-                    actType: 1,
-                    sourcePos: { gridX: source.x, gridY: source.y },
-                    targetPos: { gridX: target.x, gridY: target.y }
-                  },
-                  1000
-                ).catch(() => {});
+                try {
+                  await tokenStore.sendMessageWithPromise(
+                    tokenId,
+                    "mergebox_mergeitem",
+                    {
+                      actType: 1,
+                      sourcePos: { gridX: source.x, gridY: source.y },
+                      targetPos: { gridX: target.x, gridY: target.y }
+                    },
+                    1000
+                  );
+                  mergeCount++;
+                  totalMergeCount++;
+                } catch (_) {
+                  // 单个物品可能已被服务端合并，重新获取数据后继续。
+                }
                 await new Promise((res) => setTimeout(res, 300));
               }
             }
           }
           
-          // 继续下一轮循环
-          await new Promise((res) => setTimeout(res, 500));
+            // 继续本轮合成，直到当前没有可合成项。
+            await new Promise((res) => setTimeout(res, 500));
+          }
+
+          // 合成后重新查询服务端道具数，不能根据本轮是否产生道具来推断。
+          const latestTowerInfo = await tokenStore.sendMessageWithPromise(
+            tokenId,
+            "evotower_getinfo",
+            {},
+            5000,
+          );
+          const latestLotteryLeftCnt = Number(
+            latestTowerInfo?.evoTower?.lotteryLeftCnt || 0,
+          );
+          if (latestLotteryLeftCnt <= 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 已无怪异塔道具可使用，结束处理`,
+              type: "info",
+            });
+            break;
+          }
+
+          if (usedCount === 0 && mergeCount === 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 仍有 ${latestLotteryLeftCnt} 个道具，但当前无法使用且无物品可合成，停止以避免重复操作`,
+              type: "warning",
+            });
+            break;
+          }
+
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 合成后仍有 ${latestLotteryLeftCnt} 个道具，继续使用并合成`,
+            type: "info",
+          });
+          await wait(500);
+        }
+
+        if (settlementRound >= MAX_SETTLEMENT_ROUNDS && !shouldStop.value) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 已达到安全轮次上限，停止怪异塔道具合成`,
+            type: "warning",
+          });
         }
 
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 一键合成完成 ===`,
+          message: `=== ${token.name} 怪异塔道具合成完成：使用 ${totalUsedCount} 个，合成 ${totalMergeCount} 次 ===`,
           type: "success",
         });
 
@@ -1564,7 +1688,7 @@ export function createTasksTower(deps) {
         tokenStatus.value[tokenId] = "failed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 一键合成失败: ${error.message}`,
+          message: `${token.name} 怪异塔道具合成失败: ${error.message}`,
           type: "error",
         });
       } finally {
@@ -1581,16 +1705,19 @@ export function createTasksTower(deps) {
     await Promise.all(taskPromises);
     isRunning.value = false;
     currentRunningTokenId.value = null;
-    message.success("批量一键合成结束");
+    message.success("批量怪异塔道具合成结束");
   };
+
+  // 兼容旧定时任务和模板；新界面只展示合并后的入口。
+  const batchMergeItems = batchWeirdTowerItemMerge;
 
   return {
     climbTower,
     climbWeirdTower,
-    batchClaimFreeEnergy,
     skinChallenge,
     batchUseItems,
     batchMergeItems,
+    batchWeirdTowerItemMerge,
   };
 }
 

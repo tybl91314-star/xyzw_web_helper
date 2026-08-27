@@ -446,13 +446,6 @@
                 >
                   一键换皮闯关
                 </n-button>
-                <n-button
-                  size="small"
-                  @click="batchClaimFreeEnergy"
-                  :disabled="isRunning || selectedTokens.length === 0"
-                >
-                  换皮闯关道具领取
-                </n-button>
                 <n-popselect
                   :value="footballPick"
                   :options="footballPickOptions"
@@ -534,25 +527,14 @@
                 </n-button>
                 <n-button
                   size="small"
-                  @click="batchUseItems"
+                  @click="batchWeirdTowerItemMerge"
                   :disabled="
                     isRunning ||
                     selectedTokens.length === 0 ||
                     !isWeirdTowerActivityOpen
                   "
                 >
-                  一键使用怪异塔道具
-                </n-button>
-                <n-button
-                  size="small"
-                  @click="batchMergeItems"
-                  :disabled="
-                    isRunning ||
-                    selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
-                  "
-                >
-                  一键怪异塔合成
+                  一键怪异塔道具合成
                 </n-button>
               </n-space>
             </n-tab-pane>
@@ -2424,25 +2406,19 @@
       v-model:show="showWarGuessModal"
       preset="card"
       title="月赛助威"
-      style="width: 90%; max-width: 800px"
+      class="war-guess-modal"
+      style="width: calc(100% - 24px); max-width: 800px"
     >
       <div class="settings-content">
         <div class="settings-grid" style="display: block">
-          <div
-            style="
-              margin-bottom: 16px;
-              display: flex;
-              align-items: center;
-              gap: 12px;
-            "
-          >
-            <span style="font-size: 16px">拍手器:</span>
+          <div class="war-guess-toolbar">
+            <span class="war-guess-label">拍手器</span>
             <n-input-number
               v-model:value="warGuessCoin"
               placeholder="拍手器"
               :min="1"
               :max="20"
-              style="width: 120px"
+              class="war-guess-count"
             >
             </n-input-number>
             <n-button
@@ -2452,8 +2428,16 @@
             >
               助威
             </n-button>
-            <n-button @click="fetchWarGuessRank" :loading="warGuessLoading">
-              刷新数据
+            <n-button
+              circle
+              title="刷新数据"
+              aria-label="刷新数据"
+              @click="fetchWarGuessRank"
+              :loading="warGuessLoading"
+            >
+              <template #icon>
+                <n-icon><Refresh /></n-icon>
+              </template>
             </n-button>
           </div>
 
@@ -2469,8 +2453,8 @@
               (keys) => (selectedWarGuessLegionId = keys[0])
             "
             :row-props="warGuessRowProps"
-            style="height: 400px; flex: 1"
-            flex-height
+            :max-height="400"
+            class="war-guess-table"
           />
         </div>
         <div class="modal-actions" style="margin-top: 20px; text-align: right">
@@ -2501,7 +2485,7 @@ import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
-import { Settings } from "@vicons/ionicons5";
+import { Refresh, Settings } from "@vicons/ionicons5";
 import {
   createAccountBatches,
   getBatchIntervalMs,
@@ -2835,38 +2819,78 @@ const warGuessColumns = [
   {
     type: "selection",
     multiple: false,
+    width: 36,
   },
-  { title: "ID", key: "id", width: 100 },
   {
-    title: "头像",
-    key: "logo",
+    title: "俱乐部",
+    key: "name",
     render(row) {
-      return h("img", {
-        src: row.logo,
-        style: { width: "30px", height: "30px", borderRadius: "50%" },
-      });
+      return h(
+        "div",
+        {
+          style: {
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            minWidth: "0",
+          },
+        },
+        [
+          h("img", {
+            src: row.logo,
+            style: {
+              width: "32px",
+              height: "32px",
+              borderRadius: "50%",
+              flexShrink: "0",
+              objectFit: "cover",
+            },
+          }),
+          h("div", { style: { minWidth: "0" } }, [
+            h(
+              "div",
+              {
+                style: {
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  fontWeight: "500",
+                },
+              },
+              row.name || "未命名俱乐部",
+            ),
+            h(
+              "div",
+              {
+                style: {
+                  color: "#888",
+                  fontSize: "11px",
+                  whiteSpace: "nowrap",
+                },
+              },
+              `${row.serverId ?? "-"}服 · 红${row.quenchNum ?? 0} · 已助威${row.guessNum ?? 0}`,
+            ),
+          ]),
+        ],
+      );
     },
-    width: 60,
+    width: 132,
   },
-  { title: "区服", key: "serverId", width: 80 },
-  { title: "俱乐部", key: "name", width: 120 },
   {
     title: "战力",
     key: "power",
     render(row) {
       return formatPower(row.power);
     },
-    width: 100,
+    width: 78,
   },
-  { title: "红淬", key: "quenchNum" },
-  { title: "已助威", key: "guessNum" },
   {
     title: "总热度",
     key: "totalNum",
     render(row) {
       return formatPower(row.totalNum || 0);
     },
-    width: 100,
+    width: 78,
   },
 ];
 
@@ -3209,7 +3233,6 @@ const taskGroupDefinitions = [
       "climbTower",
       "batchmengjing",
       "skinChallenge",
-      "batchClaimFreeEnergy",
       "batchClaimPeachTasks",
       "batchBuyDreamItems",
       "batchMatchAppointment",
@@ -3220,11 +3243,7 @@ const taskGroupDefinitions = [
   {
     name: "weirdTower",
     label: "怪异塔",
-    tasks: [
-      "climbWeirdTower",
-      "batchUseItems",
-      "batchMergeItems",
-    ],
+    tasks: ["climbWeirdTower", "batchWeirdTowerItemMerge"],
   },
   {
     name: "resource",
@@ -4161,7 +4180,12 @@ const verifyTaskDependencies = async (task) => {
 
   // Verify task functions exist
   for (const taskName of task.selectedTasks) {
-    const taskFunction = eval(taskName);
+    const resolvedTaskName =
+      {
+        batchUseItems: "batchWeirdTowerItemMerge",
+        batchMergeItems: "batchWeirdTowerItemMerge",
+      }[taskName] || taskName;
+    const taskFunction = eval(resolvedTaskName);
     if (typeof taskFunction !== "function") {
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -4323,6 +4347,7 @@ const executeScheduledTask = async (task) => {
       if (
         [
           "climbWeirdTower",
+          "batchWeirdTowerItemMerge",
           "batchUseItems",
           "batchMergeItems",
         ].includes(taskName) &&
@@ -4343,7 +4368,12 @@ const executeScheduledTask = async (task) => {
       });
 
       // Call the task function dynamically
-      const taskFunction = eval(taskName);
+      const resolvedTaskName =
+        {
+          batchUseItems: "batchWeirdTowerItemMerge",
+          batchMergeItems: "batchWeirdTowerItemMerge",
+        }[taskName] || taskName;
+      const taskFunction = eval(resolvedTaskName);
       if (typeof taskFunction === "function") {
         // For batch operations, pass isScheduledTask = true
         // 具体的batch任务函数内部会使用ensureConnection管理并行连接
@@ -5416,10 +5446,10 @@ const tasksTower = createTasksTower(createTaskDeps());
 const {
   climbTower,
   climbWeirdTower,
-  batchClaimFreeEnergy,
   skinChallenge,
   batchUseItems,
   batchMergeItems,
+  batchWeirdTowerItemMerge,
 } = tasksTower;
 
 const tasksCar = createTasksCar(createTaskDeps());
@@ -6281,6 +6311,35 @@ const stopBatch = () => {
   margin-top: 12px;
 }
 
+.war-guess-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: nowrap;
+}
+
+.war-guess-label {
+  flex-shrink: 0;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.war-guess-count {
+  width: 120px;
+  min-width: 76px;
+  flex-shrink: 1;
+}
+
+.war-guess-table {
+  width: 100%;
+}
+
+.war-guess-table :deep(.n-data-table-th),
+.war-guess-table :deep(.n-data-table-td) {
+  white-space: nowrap;
+}
+
 @media (max-width: 992px) {
   .batch-daily-tasks {
     height: auto;
@@ -6311,6 +6370,30 @@ const stopBatch = () => {
 }
 
 @media (max-width: 768px) {
+  :deep(.war-guess-modal .n-card-header),
+  :deep(.war-guess-modal .n-card__content) {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .war-guess-toolbar {
+    gap: 8px;
+  }
+
+  .war-guess-label {
+    font-size: 14px;
+  }
+
+  .war-guess-count {
+    width: 86px;
+  }
+
+  .war-guess-table :deep(.n-data-table-th),
+  .war-guess-table :deep(.n-data-table-td) {
+    padding-right: 5px;
+    padding-left: 5px;
+  }
+
   .template-manager-toolbar {
     align-items: stretch;
     flex-direction: column;
