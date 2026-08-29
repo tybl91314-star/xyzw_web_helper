@@ -90,12 +90,11 @@ export const parseBlackMarketState = (response) => {
     }
 
     const goodsList = candidate?.goodsList;
-    const refresh = Number(candidate?.refresh);
-    if (
-      goodsList &&
-      typeof goodsList === "object" &&
-      Number.isFinite(refresh)
-    ) {
+    // BON会省略数值为0的默认字段：未刷新时响应只有goodsList，refresh不存在。
+    // 一旦实际刷新过，服务器才会返回refresh: 1（或更高）。
+    const refresh =
+      candidate?.refresh === undefined ? 0 : Number(candidate.refresh);
+    if (goodsList && typeof goodsList === "object" && Number.isFinite(refresh)) {
       return { goodsList, refresh };
     }
 

@@ -52,6 +52,19 @@ test("兼容批量入口的rawData包装和未解码BON响应", () => {
   );
 });
 
+test("服务器省略默认值时按黑市未刷新处理", () => {
+  const state = parseBlackMarketState({
+    goodsList: {
+      1: { buy_quantity: 0, discount: 0.5 },
+      3: { buy_quantity: 0, discount: 0.8 },
+    },
+  });
+
+  assert.equal(state.refresh, 0);
+  assert.equal(getBlackMarketBuyQuantity(state, 1), 0);
+  assert.equal(getBlackMarketBuyQuantity(state, 3), 0);
+});
+
 test("只有达到4000级的账号才使用黑市清单采购", () => {
   assert.equal(STORE_PURCHASE_UNLOCK_LEVEL, 4000);
   assert.equal(canUseStorePurchaseList({ levelId: 3999 }), false);
