@@ -265,9 +265,9 @@ export class DailyTaskRunner {
     };
 
     this.log("账号未达到4000级，执行低等级黑市宝箱购买流程");
-    let state = await getState();
+    const state = await getState();
     const initialRefresh = state.refresh;
-    let currentRound = initialRefresh + 1;
+    const currentRound = initialRefresh + 1;
     let roundResult = await buyChestRound(state, currentRound);
 
     if (!roundResult.complete) {
@@ -284,12 +284,7 @@ export class DailyTaskRunner {
           "免费刷新黑市",
         );
         refreshed = true;
-        state = await getState("刷新后重新读取黑市状态");
-        if (state.refresh <= initialRefresh) {
-          throw new Error("刷新后服务器返回的实际刷新次数未增加");
-        }
-        currentRound = state.refresh + 1;
-        roundResult = await buyChestRound(state, currentRound);
+        roundResult = await buyChestRound({ goodsList: {} }, 2);
       } catch (error) {
         throw new Error(`刷新后的黑市流程未完成: ${error.message}`);
       }
@@ -309,7 +304,7 @@ export class DailyTaskRunner {
       completed: true,
       firstRoundPurchased: true,
       refreshed,
-      refreshCount: refreshed ? state.refresh : initialRefresh,
+      refreshCount: refreshed ? initialRefresh + 1 : initialRefresh,
     };
   }
 

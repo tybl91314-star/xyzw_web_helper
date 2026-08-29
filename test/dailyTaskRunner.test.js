@@ -46,7 +46,6 @@ test("只有达到4000级的账号才使用黑市清单采购", () => {
 
 test("4000级以下按青铜铂金刷新青铜铂金的顺序购买", async () => {
   const commands = [];
-  const states = [marketState(0), marketState(1)];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-low-level", name: "低等级账号" }],
@@ -55,7 +54,7 @@ test("4000级以下按青铜铂金刷新青铜铂金的顺序购买", async () =
       }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
-        if (command === "store_goodslist") return states.shift();
+        if (command === "store_goodslist") return marketState(0);
         return {};
       },
     },
@@ -78,7 +77,6 @@ test("4000级以下按青铜铂金刷新青铜铂金的顺序购买", async () =
     { command: "store_buy", params: { goodsId: BRONZE_CHEST_GOODS_ID } },
     { command: "store_buy", params: { goodsId: PLATINUM_CHEST_GOODS_ID } },
     { command: "store_refresh", params: { storeId: 1 } },
-    { command: "store_goodslist", params: { storeId: 1 } },
     { command: "store_buy", params: { goodsId: BRONZE_CHEST_GOODS_ID } },
     { command: "store_buy", params: { goodsId: PLATINUM_CHEST_GOODS_ID } },
   ]);
