@@ -66,6 +66,7 @@ export const canUseStorePurchaseList = (roleData) => {
 export const parseBlackMarketState = (response) => {
   const queue = [response];
   const visited = new Set();
+  const inspected = [];
   const nestedKeys = [
     "rawData",
     "decodedBody",
@@ -80,7 +81,13 @@ export const parseBlackMarketState = (response) => {
     const candidate = queue.shift();
     if (candidate == null || visited.has(candidate)) continue;
 
-    if (typeof candidate === "object") visited.add(candidate);
+    if (typeof candidate === "object") {
+      visited.add(candidate);
+      const keys = Object.keys(candidate).slice(0, 12);
+      inspected.push(keys.length > 0 ? keys.join(",") : "空对象");
+    } else {
+      inspected.push(typeof candidate);
+    }
 
     const goodsList = candidate?.goodsList;
     const refresh = Number(candidate?.refresh);
@@ -131,7 +138,11 @@ export const parseBlackMarketState = (response) => {
     }
   }
 
-  throw new Error("黑市状态返回缺少 goodsList 或 refresh 字段");
+  const responseCmd = response?._responseCmd || response?.cmd || "未知";
+  const inspectedText = [...new Set(inspected)].slice(0, 4).join(" / ");
+  throw new Error(
+    `黑市状态返回缺少 goodsList 或 refresh 字段（响应: ${responseCmd}；字段: ${inspectedText || "无"}）`,
+  );
 };
 
 export const getBlackMarketBuyQuantity = (state, goodsId) => {

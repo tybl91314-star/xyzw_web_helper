@@ -885,10 +885,16 @@ export class XyzwWebSocketClient {
       const requestSeq = ++this.seq;
 
       // 设置 Promise 状态，使用seq作为键
-      this.promises[requestSeq] = { resolve, reject, originalCmd: cmd };
+      const promiseData = {
+        resolve,
+        reject,
+        originalCmd: cmd,
+        timer: null,
+      };
+      this.promises[requestSeq] = promiseData;
 
       // 超时处理
-      const timer = setTimeout(() => {
+      promiseData.timer = setTimeout(() => {
         delete this.promises[requestSeq];
         reject(new Error(`请求超时: ${cmd} (${timeoutMs}ms)`));
       }, timeoutMs);
@@ -1037,7 +1043,25 @@ export class XyzwWebSocketClient {
     // 优先使用resp字段进行响应匹配（新的正确方式）
     if (packet.resp !== undefined && this.promises[packet.resp]) {
       const promiseData = this.promises[packet.resp];
+
+      // 黑市列表请求可能伴随同一请求链上的同步/通知包。AI之王的游戏内
+      // 实现会等待 Store_GoodsListResp 更新 storeInfo 后才读取商品数据，
+      // 这里同样必须等到真正的列表响应，不能只凭 resp 序号提前结束。
+      const responseCmd =
+        typeof packet.cmd === "string" ? packet.cmd.toLowerCase() : "";
+      if (
+        promiseData.originalCmd === "store_goodslist" &&
+        responseCmd !== "store_goodslistresp"
+      ) {
+        gameLogger.debug("忽略黑市列表请求关联的非列表响应", {
+          responseCmd,
+          resp: packet.resp,
+        });
+        return;
+      }
+
       delete this.promises[packet.resp];
+      if (promiseData.timer) clearTimeout(promiseData.timer);
 
       // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
       const responseBody =
@@ -1048,6 +1072,10 @@ export class XyzwWebSocketClient {
             : packet.body;
 
       if (packet.code === 0 || packet.code === undefined) {
+        if (responseBody && typeof responseBody === "object") {
+          responseBody._originalCmd = promiseData.originalCmd;
+          responseBody._responseCmd = responseCmd;
+        }
         promiseData.resolve(responseBody || packet);
       } else {
         // 获取错误描述
@@ -1229,6 +1257,7 @@ export class XyzwWebSocketClient {
       // 检查 Promise 是否匹配当前响应的任一原始命令
       if (originalCmds.includes(promiseData.originalCmd)) {
         delete this.promises[requestId];
+        if (promiseData.timer) clearTimeout(promiseData.timer);
 
         // 获取响应数据，优先使用 rawData（ProtoMsg 自动解码），然后 decodedBody（手动解码），最后 body
         const responseBody =
@@ -1241,6 +1270,7 @@ export class XyzwWebSocketClient {
         // 附加原始命令名到响应对象
         if (responseBody && typeof responseBody === "object") {
           responseBody._originalCmd = promiseData.originalCmd;
+          responseBody._responseCmd = respCmdKey;
         }
 
         if (packet.code === 0 || packet.code === undefined) {
