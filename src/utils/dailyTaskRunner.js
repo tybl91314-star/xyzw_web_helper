@@ -51,6 +51,33 @@ export const getDailyActivityPoint = (roleData) => {
 export const isDailyActivityComplete = (roleData) =>
   getDailyActivityPoint(roleData) >= DAILY_ACTIVITY_TARGET;
 
+export const BLACK_MARKET_DAILY_TASK_ID = 12;
+export const BRONZE_CHEST_GOODS_ID = 1;
+export const PLATINUM_CHEST_GOODS_ID = 3;
+export const STORE_PURCHASE_UNLOCK_LEVEL = 4000;
+
+export const canUseStorePurchaseList = (roleData) => {
+  const levelId = Number(roleData?.levelId);
+  return !Number.isFinite(levelId) || levelId >= STORE_PURCHASE_UNLOCK_LEVEL;
+};
+
+export const parseBlackMarketState = (response) => {
+  const body = response?._raw?.body ?? response?.body ?? response;
+  const goodsList = body?.goodsList;
+  const refresh = Number(body?.refresh);
+
+  if (!goodsList || typeof goodsList !== "object" || !Number.isFinite(refresh)) {
+    throw new Error("黑市状态返回缺少 goodsList 或 refresh 字段");
+  }
+
+  return { goodsList, refresh };
+};
+
+export const getBlackMarketBuyQuantity = (state, goodsId) => {
+  const quantity = Number(state?.goodsList?.[goodsId]?.buy_quantity ?? 0);
+  return Number.isFinite(quantity) ? quantity : 0;
+};
+
 export const FINAL_REWARD_TASKS = Object.freeze([
   {
     name: "领取周常任务奖励",
@@ -185,6 +212,153 @@ export class DailyTaskRunner {
         throw fallbackError;
       }
     }
+  }
+
+  async buyLowLevelBlackMarketChests(tokenId) {
+    const getState = async (description = "读取黑市状态") => {
+      const response = await this.executeGameCommand(
+        tokenId,
+        "store_goodslist",
+        { storeId: 1 },
+        description,
+      );
+      return parseBlackMarketState(response);
+    };
+
+    const buyChestIfNeeded = async (state, goodsId, description) => {
+      if (getBlackMarketBuyQuantity(state, goodsId) > 0) {
+        this.log(`${description}：服务器显示当前轮已购买，跳过`, "success");
+        return { purchased: false, alreadyPurchased: true };
+      }
+
+      try {
+        await this.executeGameCommand(
+          tokenId,
+          "store_buy",
+          { goodsId },
+          description,
+        );
+        return { purchased: true, alreadyPurchased: false };
+      } catch (error) {
+        this.log(`${description}失败，继续执行低等级黑市流程`, "warning");
+        return { purchased: false, alreadyPurchased: false };
+      }
+    };
+
+    const buyChestRound = async (state, round) => {
+      const bronze = await buyChestIfNeeded(
+        state,
+        BRONZE_CHEST_GOODS_ID,
+        `第${round}轮购买200金砖青铜宝箱`,
+      );
+      const platinum = await buyChestIfNeeded(
+        state,
+        PLATINUM_CHEST_GOODS_ID,
+        `第${round}轮购买500金砖铂金宝箱`,
+      );
+      return {
+        purchased: bronze.purchased || platinum.purchased,
+        complete:
+          (bronze.purchased || bronze.alreadyPurchased) &&
+          (platinum.purchased || platinum.alreadyPurchased),
+      };
+    };
+
+    this.log("账号未达到4000级，执行低等级黑市宝箱购买流程");
+    let state = await getState();
+    const initialRefresh = state.refresh;
+    let currentRound = initialRefresh + 1;
+    let roundResult = await buyChestRound(state, currentRound);
+
+    if (!roundResult.complete) {
+      throw new Error("当前轮青铜宝箱和铂金宝箱未全部购买成功");
+    }
+
+    let refreshed = false;
+    if (initialRefresh === 0) {
+      try {
+        await this.executeGameCommand(
+          tokenId,
+          "store_refresh",
+          { storeId: 1 },
+          "免费刷新黑市",
+        );
+        refreshed = true;
+        state = await getState("刷新后重新读取黑市状态");
+        if (state.refresh <= initialRefresh) {
+          throw new Error("刷新后服务器返回的实际刷新次数未增加");
+        }
+        currentRound = state.refresh + 1;
+        roundResult = await buyChestRound(state, currentRound);
+      } catch (error) {
+        throw new Error(`刷新后的黑市流程未完成: ${error.message}`);
+      }
+    } else {
+      this.log(
+        `服务器显示今日黑市已刷新${initialRefresh}次，不再重复刷新`,
+        "success",
+      );
+    }
+
+    if (!roundResult.complete) {
+      throw new Error("当前轮青铜宝箱和铂金宝箱未全部购买成功");
+    }
+
+    return {
+      lowLevelFlow: true,
+      completed: true,
+      firstRoundPurchased: true,
+      refreshed,
+      refreshCount: refreshed ? state.refresh : initialRefresh,
+    };
+  }
+
+  async purchaseBlackMarketDailyItem(tokenId, roleData = null) {
+    if (roleData && !canUseStorePurchaseList(roleData)) {
+      return this.buyLowLevelBlackMarketChests(tokenId);
+    }
+
+    try {
+      await this.executeGameCommand(
+        tokenId,
+        "store_purchase",
+        {},
+        "根据清单采购黑市商品",
+      );
+    } catch (error) {
+      this.log(
+        `清单采购不可用或执行失败，继续核对黑市日常任务: ${error.message}`,
+        "warning",
+      );
+    }
+
+    this.log("检查黑市购买日常任务是否完成...");
+    let roleInfoResp;
+    try {
+      roleInfoResp = await this.tokenStore.sendGetRoleInfo(tokenId);
+    } catch (error) {
+      throw new Error(
+        `无法刷新黑市日常任务状态，为避免重复购买已停止兜底: ${error.message}`,
+      );
+    }
+    const completedTasks = roleInfoResp?.role?.dailyTask?.complete ?? {};
+
+    if (completedTasks[BLACK_MARKET_DAILY_TASK_ID] === -1) {
+      this.log("清单采购已完成黑市购买日常任务", "success");
+      return { fallbackPurchased: false };
+    }
+
+    this.log(
+      "清单采购未买到符合要求的商品，购买1个200金砖青铜宝箱",
+      "warning",
+    );
+    await this.executeGameCommand(
+      tokenId,
+      "store_buy",
+      { goodsId: BRONZE_CHEST_GOODS_ID },
+      "购买200金砖青铜宝箱",
+    );
+    return { fallbackPurchased: true };
   }
 
   loadSettings(roleId) {
@@ -643,13 +817,7 @@ export class DailyTaskRunner {
     if (!isTaskCompleted(12) && settings.blackMarketPurchase) {
       taskList.push({
         name: "黑市购买1次物品",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "store_purchase",
-            { goodsId: 1 },
-            "黑市购买1次物品",
-          ),
+        execute: () => this.purchaseBlackMarketDailyItem(tokenId, roleData),
       });
     }
 
