@@ -6,6 +6,9 @@ import {
   isCarActivityOpenAt,
   isDreamActivityOpenAt,
   isVaultActivityOpenAt,
+  getActivityWeekAt,
+  isWeirdTowerActivityOpenAt,
+  isWeirdTowerMergeAvailableAt,
 } from "../src/utils/batch/activityAvailability.js";
 
 const localDate = (year, month, day, hour, minute = 0) =>
@@ -27,4 +30,32 @@ test("其他按星期和小时开放的活动按传入时间重新判断", () =>
   assert.equal(isArenaActivityOpenAt(localDate(2026, 8, 3, 5, 59)), false);
   assert.equal(isArenaActivityOpenAt(localDate(2026, 8, 3, 6)), true);
   assert.equal(isArenaActivityOpenAt(localDate(2026, 8, 3, 22)), false);
+});
+
+test("怪异塔周四结束，但道具合成延续到周五11点前", () => {
+  assert.equal(
+    isWeirdTowerActivityOpenAt(localDate(2025, 12, 12, 11, 59)),
+    false,
+  );
+  assert.equal(
+    isWeirdTowerActivityOpenAt(localDate(2025, 12, 12, 12)),
+    true,
+  );
+  const thursdayEnd = new Date(2025, 11, 18, 23, 59, 59);
+  assert.equal(isWeirdTowerActivityOpenAt(thursdayEnd), true);
+  assert.equal(isWeirdTowerMergeAvailableAt(thursdayEnd), true);
+  assert.equal(
+    isWeirdTowerActivityOpenAt(localDate(2025, 12, 19, 10, 59)),
+    false,
+  );
+  assert.equal(
+    isWeirdTowerMergeAvailableAt(localDate(2025, 12, 19, 10, 59)),
+    true,
+  );
+  assert.equal(getActivityWeekAt(localDate(2025, 12, 19, 10, 59)), "黑市周");
+  assert.equal(
+    isWeirdTowerMergeAvailableAt(localDate(2025, 12, 19, 11)),
+    false,
+  );
+  assert.equal(isWeirdTowerActivityOpenAt(localDate(2025, 12, 19, 12)), false);
 });

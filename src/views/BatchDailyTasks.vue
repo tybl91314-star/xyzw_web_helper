@@ -455,8 +455,9 @@
                   <n-button
                     size="small"
                     :disabled="isRunning || selectedTokens.length === 0"
+                    title="仅支持手动执行"
                   >
-                    一键竞猜({{ footballPickLabel }})
+                    咸鱼神杯竞猜({{ footballPickLabel }})
                   </n-button>
                 </n-popselect>
                 <n-button
@@ -531,7 +532,7 @@
                   :disabled="
                     isRunning ||
                     selectedTokens.length === 0 ||
-                    !isWeirdTowerActivityOpen
+                    !isWeirdTowerMergeAvailable
                   "
                 >
                   一键怪异塔道具合成
@@ -679,7 +680,11 @@
                     selectedTokens.length === 0 ||
                     !isWarGuessActivityOpen
                   "
-                  :title="isWarGuessActivityOpen ? '' : warGuessActivityTip"
+                  :title="
+                    isWarGuessActivityOpen
+                      ? '仅支持手动执行'
+                      : warGuessActivityTip
+                  "
                 >
                   月赛助威
                 </n-button>
@@ -2527,6 +2532,8 @@ import {
   isCarActivityOpenAt,
   isDreamActivityOpenAt,
   isVaultActivityOpenAt,
+  isWeirdTowerActivityOpenAt,
+  isWeirdTowerMergeAvailableAt,
   // Log utilities
   createLogManager,
   addTaskSaveLog,
@@ -2677,38 +2684,12 @@ const isbaokuActivityOpen = computed(() =>
 const isarenaActivityOpen = computed(() =>
   isArenaActivityOpenAt(activityClock.value),
 );
-const getCurrentActivityWeek = computed(() => {
-  const now = new Date(activityClock.value);
-  const start = new Date("2025-12-12T12:00:00"); // 起始时间：黑市周开始
-  const weekDuration = 7 * 24 * 60 * 60 * 1000; // 一周毫秒数
-  const cycleDuration = 3 * weekDuration; // 三周期毫秒数
-
-  const elapsed = now - start;
-  if (elapsed < 0) return null; // 活动开始前
-
-  const cyclePosition = elapsed % cycleDuration;
-
-  if (cyclePosition < weekDuration) {
-    return "黑市周";
-  } else if (cyclePosition < 2 * weekDuration) {
-    return "招募周";
-  } else {
-    return "宝箱周";
-  }
-});
-
-const isWeirdTowerActivityOpen = computed(() => {
-  if (getCurrentActivityWeek.value !== "黑市周") return false;
-
-  const now = new Date(activityClock.value);
-  const day = now.getDay();
-  const hour = now.getHours();
-  // 如果是周五，必须在12点之后
-  if (day === 5) {
-    return hour >= 12;
-  }
-  return true;
-});
+const isWeirdTowerActivityOpen = computed(() =>
+  isWeirdTowerActivityOpenAt(activityClock.value),
+);
+const isWeirdTowerMergeAvailable = computed(() =>
+  isWeirdTowerMergeAvailableAt(activityClock.value),
+);
 
 // 获取本月第四个周日的日期
 const getFourthSundayOfMonth = () => {
@@ -3254,9 +3235,14 @@ const taskGroupDefinitions = [
       "batchClaimBoxPointReward",
       "batchFish",
       "batchRecruit",
+      "batchHeroUpgrade",
+      "batchFishSpiritUpgrade",
+      "batchBookUpgrade",
+      "batchClaimStarRewards",
       "batchMarkMailRead",
       "batchDeleteReadMails",
       "legion_storebuygoods",
+      "legionStoreBuySkinCoins",
     ],
   },
   {
@@ -4345,17 +4331,28 @@ const executeScheduledTask = async (task) => {
       }
 
       if (
-        [
-          "climbWeirdTower",
-          "batchWeirdTowerItemMerge",
-          "batchUseItems",
-          "batchMergeItems",
-        ].includes(taskName) &&
+        taskName === "climbWeirdTower" &&
         !isWeirdTowerActivityOpen.value
       ) {
         addLog({
           time: new Date().toLocaleTimeString(),
           message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在怪异塔开放时间)`,
+          type: "warning",
+        });
+        return;
+      }
+
+      if (
+        [
+          "batchWeirdTowerItemMerge",
+          "batchUseItems",
+          "batchMergeItems",
+        ].includes(taskName) &&
+        !isWeirdTowerMergeAvailable.value
+      ) {
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `跳过任务: ${availableTasks.find((t) => t.value === taskName)?.label || taskName} (不在怪异塔合成开放时间)`,
           type: "warning",
         });
         return;

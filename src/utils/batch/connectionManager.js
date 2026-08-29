@@ -7,6 +7,9 @@ import {
   isCarActivityOpenAt,
   isDreamActivityOpenAt,
   isVaultActivityOpenAt,
+  getActivityWeekAt,
+  isWeirdTowerActivityOpenAt,
+  isWeirdTowerMergeAvailableAt,
 } from "./activityAvailability.js";
 
 // 全局连接队列控制 - 限制并发连接数
@@ -185,24 +188,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
 export const getActivityStatus = () => {
   const now = new Date();
 
-  // 计算当前活动周
-  const start = new Date("2025-12-12T12:00:00"); // 起始时间：黑市周开始
-  const weekDuration = 7 * 24 * 60 * 60 * 1000; // 一周毫秒数
-  const cycleDuration = 3 * weekDuration; // 三周期毫秒数
-
-  const elapsed = now - start;
-  let currentActivityWeek = null;
-  
-  if (elapsed >= 0) {
-    const cyclePosition = elapsed % cycleDuration;
-    if (cyclePosition < weekDuration) {
-      currentActivityWeek = "黑市周";
-    } else if (cyclePosition < 2 * weekDuration) {
-      currentActivityWeek = "招募周";
-    } else {
-      currentActivityWeek = "宝箱周";
-    }
-  }
+  const currentActivityWeek = getActivityWeekAt(now);
 
   return {
     // 车活动开放 (周一到周三 06:00-20:00)
@@ -216,7 +202,8 @@ export const getActivityStatus = () => {
     // 当前活动周
     currentActivityWeek,
     // 怪异塔活动开放 (黑市周)
-    isWeirdTowerActivityOpen: currentActivityWeek === "黑市周",
+    isWeirdTowerActivityOpen: isWeirdTowerActivityOpenAt(now),
+    isWeirdTowerMergeAvailable: isWeirdTowerMergeAvailableAt(now),
   };
 };
 

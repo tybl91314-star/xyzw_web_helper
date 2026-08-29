@@ -352,6 +352,7 @@ export function registerDefaultCommands(reg) {
 
     // 功法
     .register("legacy_getinfo")
+    .register("legacy_beginhangup")
     .register("legacy_claimhangup")
     .register("legacy_claimgifttask", { id: 0 })
     // 功法残卷赠送
@@ -1164,6 +1165,7 @@ export class XyzwWebSocketClient {
       bosstower_gethelprankresp: "bosstower_gethelprank",
       // 功法相关响应映射
       legacy_getinforesp: "legacy_getinfo",
+      legacy_beginhangupresp: "legacy_beginhangup",
       legacy_claimhangupresp: "legacy_claimhangup",
       legacy_claimgifttaskresp: "legacy_claimgifttask",
       legacy_sendgiftresp: "legacy_sendgift",

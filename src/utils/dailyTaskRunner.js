@@ -1,5 +1,3 @@
-import { useTokenStore } from "@/stores/tokenStore";
-
 // 辅助函数
 const pickArenaTargetId = (targets) => {
   if (!targets) return null;
@@ -41,6 +39,46 @@ const getTodayBossId = () => {
   const DAY_BOSS_MAP = [9904, 9905, 9901, 9902, 9903, 9904, 9905]; // 周日~周六
   const dayOfWeek = new Date().getDay();
   return DAY_BOSS_MAP[dayOfWeek];
+};
+
+export const DAILY_ACTIVITY_TARGET = 100;
+
+export const getDailyActivityPoint = (roleData) => {
+  const dailyPoint = Number(roleData?.dailyTask?.dailyPoint ?? 0);
+  return Number.isFinite(dailyPoint) ? dailyPoint : 0;
+};
+
+export const isDailyActivityComplete = (roleData) =>
+  getDailyActivityPoint(roleData) >= DAILY_ACTIVITY_TARGET;
+
+export const FINAL_REWARD_TASKS = Object.freeze([
+  {
+    name: "领取周常任务奖励",
+    command: "task_claimweekreward",
+    params: {},
+  },
+  {
+    name: "领取通行证奖励",
+    command: "activity_recyclewarorderrewardclaim",
+    params: { actId: 1 },
+  },
+  {
+    name: "领取日常任务奖励",
+    command: "task_claimdailyreward",
+    params: {},
+  },
+]);
+
+export const getRemainingLegionBossFights = (
+  configuredTimes,
+  completedTimes,
+  completedToday,
+) => {
+  const target = Math.max(Number(configuredTimes) || 0, 0);
+  const completed = completedToday
+    ? Math.max(Number(completedTimes) || 0, 0)
+    : 0;
+  return Math.max(target - completed, 0);
 };
 
 export class DailyTaskRunner {
@@ -192,28 +230,20 @@ export class DailyTaskRunner {
       throw new Error("角色数据不存在");
     }
 
+    const dailyPoint = getDailyActivityPoint(roleData);
+    this.log(`当前每日活跃: ${dailyPoint}/${DAILY_ACTIVITY_TARGET}`);
+    if (isDailyActivityComplete(roleData)) {
+      this.log("每日活跃已达到100，跳过该账号的日常任务", "success");
+      if (this.callbacks?.onProgress) this.callbacks.onProgress(100);
+      return { skipped: true, dailyPoint };
+    }
+
     // 重新加载设置，使用正确的 roleId (虽然通常 tokenId 就是 roleId 或者一一对应，但为了保险)
     // 在这个项目中，tokenId 似乎就是 roleId 或者用于标识
     // DailyTaskStatus.vue 中: const role = getCurrentRole() -> roleId: tokenStore.selectedToken.id
     // 所以 tokenId 就是 key
 
     this.log("开始执行每日任务补差");
-
-    // 读取并保存当前阵容信息
-    let originalFormation = null;
-    try {
-      this.log("读取当前阵容信息...");
-      const teamInfo = await this.executeGameCommand(
-        tokenId,
-        "presetteam_getinfo",
-        {},
-        "获取当前阵容信息",
-      );
-      originalFormation = teamInfo?.presetTeamInfo?.useTeamId;
-      this.log(`当前阵容: ${originalFormation}`);
-    } catch (error) {
-      this.log(`读取当前阵容失败: ${error.message}`, "warning");
-    }
 
     const completedTasks = roleData.dailyTask?.complete ?? {};
     const isTaskCompleted = (taskId) => completedTasks[taskId] === -1;
@@ -426,13 +456,11 @@ export class DailyTaskRunner {
 
     // 3. BOSS
     if (settings.bossTimes > 0) {
-      let alreadyLegionBoss = statistics["legion:boss"] ?? 0;
-      if (isTodayAvailable(statisticsTime["legion:boss"])) {
-        alreadyLegionBoss = 0;
-      }
-      const remainingLegionBoss = Math.max(
-        settings.bossTimes - alreadyLegionBoss,
-        0,
+      const alreadyLegionBoss = statistics["legion:boss"] ?? 0;
+      const remainingLegionBoss = getRemainingLegionBossFights(
+        settings.bossTimes,
+        alreadyLegionBoss,
+        !isTodayAvailable(statisticsTime["legion:boss"]),
       );
 
       if (remainingLegionBoss > 0) {
@@ -484,6 +512,16 @@ export class DailyTaskRunner {
           ),
       });
     }
+
+    taskList.push({
+      name: "BOSS结束恢复竞技场阵容",
+      execute: () =>
+        this.switchToFormationIfNeeded(
+          tokenId,
+          settings.arenaFormation,
+          "竞技场阵容",
+        ),
+    });
 
     // 4. 固定奖励
     const fixedRewards = [
@@ -653,19 +691,6 @@ export class DailyTaskRunner {
       });
     }
 
-    // 阵容还原
-    if (originalFormation) {
-      taskList.push({
-        name: "阵容还原",
-        execute: () =>
-          this.switchToFormationIfNeeded(
-            tokenId,
-            originalFormation,
-            "初始阵容",
-          ),
-      });
-    }
-
     // 7. 任务奖励
     for (let taskId = 1; taskId <= 10; taskId++) {
       taskList.push({
@@ -681,37 +706,19 @@ export class DailyTaskRunner {
       });
     }
 
+    // 每日活跃奖励必须是整个流程的最后一步，确保中断重跑时仍能通过
+    // dailyPoint 判断出哪些账号尚未完成。
     taskList.push(
-      {
-        name: "领取日常任务奖励",
+      ...FINAL_REWARD_TASKS.map((task) => ({
+        name: task.name,
         execute: () =>
           this.executeGameCommand(
             tokenId,
-            "task_claimdailyreward",
-            {},
-            "领取日常任务奖励",
+            task.command,
+            task.params,
+            task.name,
           ),
-      },
-      {
-        name: "领取周常任务奖励",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "task_claimweekreward",
-            {},
-            "领取周常任务奖励",
-          ),
-      },
-      {
-        name: "领取通行证奖励",
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "activity_recyclewarorderrewardclaim",
-            { actId: 1 },
-            "领取通行证奖励",
-          ),
-      },
+      })),
     );
 
     // 执行

@@ -16,6 +16,26 @@ import {
 } from "./legacyGift.js";
 
 /**
+ * 领取挂机残卷；赛季初尚未开始探索时，服务端会拒绝首次领取。
+ * 此时只有 legacy_beginhangup 真正成功，才重试领取；开始探索也失败时
+ * 仍抛出原领取错误，避免掩盖真正的领取失败原因。
+ */
+export async function claimLegacyHangUpWithAutoStart(send, onStarted) {
+  try {
+    return await send("legacy_claimhangup", {});
+  } catch (claimError) {
+    try {
+      await send("legacy_beginhangup", {});
+    } catch {
+      throw claimError;
+    }
+
+    onStarted?.();
+    return send("legacy_claimhangup", {});
+  }
+}
+
+/**
  * 创建功法类任务执行器
  * @param {Object} deps - 依赖项
  * @returns {Object} 任务函数集合
@@ -68,11 +88,20 @@ export function createTasksLegacy(deps) {
         });
         await ensureConnection(tokenId);
 
-        const LegacyClaimHangUpResp = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "legacy_claimhangup",
-          {},
-          5000,
+        const LegacyClaimHangUpResp = await claimLegacyHangUpWithAutoStart(
+          (command, params) =>
+            tokenStore.sendMessageWithPromise(
+              tokenId,
+              command,
+              params,
+              5000,
+            ),
+          () =>
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 首次领取失败，开始探索协议已成功，正在重新领取`,
+              type: "info",
+            }),
         );
         addLog({
           time: new Date().toLocaleTimeString(),
