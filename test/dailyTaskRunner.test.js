@@ -15,6 +15,7 @@ import {
   getDailyActivityPoint,
   getBlackMarketBuyQuantity,
   getRemainingLegionBossFights,
+  isBlackMarketDailyTaskCompleted,
   isDailyActivityComplete,
   parseBlackMarketState,
 } from "../src/utils/dailyTaskRunner.js";
@@ -168,6 +169,42 @@ test("黑市日常已完成时不分等级直接结束", async () => {
   assert.deepEqual(commands, []);
 });
 
+test("黑市日常已完成待领取时也直接结束", async () => {
+  assert.equal(
+    isBlackMarketDailyTaskCompleted({ dailyTask: { complete: { 12: 0 } } }),
+    false,
+  );
+  assert.equal(
+    isBlackMarketDailyTaskCompleted({ dailyTask: { complete: { 12: 1 } } }),
+    true,
+  );
+  assert.equal(
+    isBlackMarketDailyTaskCompleted({ dailyTask: { complete: { 12: -1 } } }),
+    true,
+  );
+
+  const commands = [];
+  const runner = new DailyTaskRunner(
+    {
+      gameTokens: [{ id: "role-market", name: "待领取账号" }],
+      sendGetRoleInfo: async () => ({
+        role: { levelId: 4000, dailyTask: { complete: { 12: 1 } } },
+      }),
+      sendMessageWithPromise: async (_tokenId, command, params) => {
+        commands.push({ command, params });
+        return {};
+      },
+    },
+    { commandDelay: 0, taskDelay: 0 },
+  );
+
+  assert.deepEqual(await runner.purchaseBlackMarketDailyItem("role-market"), {
+    dailyTaskCompleted: true,
+    skipped: true,
+  });
+  assert.deepEqual(commands, []);
+});
+
 test("黑市清单未购得商品时补买200金砖青铜宝箱", async () => {
   const commands = [];
   const roleStates = [0, 0];
@@ -207,9 +244,9 @@ test("黑市清单未购得商品时补买200金砖青铜宝箱", async () => {
   ]);
 });
 
-test("清单采购成功完成黑市日常时不再补买青铜宝箱", async () => {
+test("清单采购成功后任务待领取时不再补买青铜宝箱", async () => {
   const commands = [];
-  const roleStates = [0, -1];
+  const roleStates = [0, 1];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-market", name: "黑市测试账号" }],

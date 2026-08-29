@@ -63,6 +63,12 @@ export const canUseStorePurchaseList = (roleData) => {
   return !Number.isFinite(levelId) || levelId >= STORE_PURCHASE_UNLOCK_LEVEL;
 };
 
+export const isBlackMarketDailyTaskCompleted = (roleData) => {
+  const value = roleData?.dailyTask?.complete?.[BLACK_MARKET_DAILY_TASK_ID];
+  // 0：未完成；1（或更高）：已完成待领取；-1：奖励已领取。
+  return value === -1 || Number(value) >= 1;
+};
+
 export const parseBlackMarketState = (response) => {
   const queue = [response];
   const visited = new Set();
@@ -389,9 +395,8 @@ export class DailyTaskRunner {
     }
 
     const roleData = roleInfoResp?.role;
-    const completedTasks = roleData?.dailyTask?.complete ?? {};
-    if (completedTasks[BLACK_MARKET_DAILY_TASK_ID] === -1) {
-      this.log("黑市购买日常任务已经完成，无需再次执行", "success");
+    if (isBlackMarketDailyTaskCompleted(roleData)) {
+      this.log("黑市购买日常任务已经完成（含待领取），无需再次执行", "success");
       return { dailyTaskCompleted: true, skipped: true };
     }
 
@@ -448,9 +453,7 @@ export class DailyTaskRunner {
         `无法刷新黑市日常任务状态，为避免重复购买已停止兜底: ${error.message}`,
       );
     }
-    const refreshedCompletedTasks = roleInfoResp?.role?.dailyTask?.complete ?? {};
-
-    if (refreshedCompletedTasks[BLACK_MARKET_DAILY_TASK_ID] === -1) {
+    if (isBlackMarketDailyTaskCompleted(roleInfoResp?.role)) {
       this.log("清单采购已完成黑市购买日常任务", "success");
       return {
         dailyTaskCompleted: true,
