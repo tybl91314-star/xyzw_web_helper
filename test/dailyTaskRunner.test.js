@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { bonProtocol } from "../src/utils/bonProtocol.js";
+
 import {
   BLACK_MARKET_DAILY_TASK_ID,
   BRONZE_CHEST_GOODS_ID,
@@ -34,6 +36,20 @@ test("解析服务器黑市刷新次数和当前商品购买数量", () => {
   assert.equal(getBlackMarketBuyQuantity(state, 1), 1);
   assert.equal(getBlackMarketBuyQuantity(state, 3), 1);
   assert.equal(getBlackMarketBuyQuantity(state, 16), 0);
+});
+
+test("兼容批量入口的rawData包装和未解码BON响应", () => {
+  const expected = marketState(1, 1, 1);
+
+  assert.deepEqual(parseBlackMarketState({ rawData: expected }), expected);
+  assert.deepEqual(
+    parseBlackMarketState({ _raw: { decodedBody: expected } }),
+    expected,
+  );
+  assert.deepEqual(
+    parseBlackMarketState({ _raw: { body: bonProtocol.encode(expected) } }),
+    expected,
+  );
 });
 
 test("只有达到4000级的账号才使用黑市清单采购", () => {

@@ -1,3 +1,5 @@
+import { bonProtocol } from "./bonProtocol.js";
+
 // 辅助函数
 const pickArenaTargetId = (targets) => {
   if (!targets) return null;
@@ -62,15 +64,74 @@ export const canUseStorePurchaseList = (roleData) => {
 };
 
 export const parseBlackMarketState = (response) => {
-  const body = response?._raw?.body ?? response?.body ?? response;
-  const goodsList = body?.goodsList;
-  const refresh = Number(body?.refresh);
+  const queue = [response];
+  const visited = new Set();
+  const nestedKeys = [
+    "rawData",
+    "decodedBody",
+    "body",
+    "_raw",
+    "_rawData",
+    "_data",
+    "data",
+  ];
 
-  if (!goodsList || typeof goodsList !== "object" || !Number.isFinite(refresh)) {
-    throw new Error("黑市状态返回缺少 goodsList 或 refresh 字段");
+  while (queue.length > 0) {
+    const candidate = queue.shift();
+    if (candidate == null || visited.has(candidate)) continue;
+
+    if (typeof candidate === "object") visited.add(candidate);
+
+    const goodsList = candidate?.goodsList;
+    const refresh = Number(candidate?.refresh);
+    if (
+      goodsList &&
+      typeof goodsList === "object" &&
+      Number.isFinite(refresh)
+    ) {
+      return { goodsList, refresh };
+    }
+
+    let bytes = null;
+    if (candidate instanceof Uint8Array) {
+      bytes = candidate;
+    } else if (candidate instanceof ArrayBuffer) {
+      bytes = new Uint8Array(candidate);
+    } else if (Array.isArray(candidate)) {
+      bytes = new Uint8Array(candidate);
+    } else if (typeof candidate === "object") {
+      const keys = Object.keys(candidate);
+      if (keys.length > 0 && keys.every((key) => /^\d+$/.test(key))) {
+        bytes = new Uint8Array(
+          keys
+            .map(Number)
+            .sort((a, b) => a - b)
+            .map((key) => candidate[key]),
+        );
+      }
+    }
+
+    if (bytes) {
+      try {
+        queue.push(bonProtocol.decode(bytes));
+      } catch {
+        // 不是可独立解码的BON体，继续检查其他包装层。
+      }
+    }
+
+    if (typeof candidate === "object") {
+      for (const key of nestedKeys) {
+        try {
+          const nested = candidate[key];
+          if (nested !== undefined && nested !== candidate) queue.push(nested);
+        } catch {
+          // 某些协议对象使用惰性getter，读取失败时继续尝试其他字段。
+        }
+      }
+    }
   }
 
-  return { goodsList, refresh };
+  throw new Error("黑市状态返回缺少 goodsList 或 refresh 字段");
 };
 
 export const getBlackMarketBuyQuantity = (state, goodsId) => {
