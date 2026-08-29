@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   createTasksStore,
   findWeeklyFreeStoreGoods,
-  isNoPurchasableStoreGoodsError,
 } from "../src/utils/batch/tasksStore.js";
 
 const createStorePurchaseHarness = ({
@@ -15,9 +14,12 @@ const createStorePurchaseHarness = ({
   const logs = [];
   const commands = [];
   const tokenStatus = { value: {} };
+  const roleResponses = Array.isArray(roleData) ? [...roleData] : [roleData];
   const tokenStore = {
     gameTokens: [{ id: "role-1", name: "测试账号" }],
-    sendGetRoleInfo: async () => ({ role: roleData }),
+    sendGetRoleInfo: async () => ({
+      role: roleResponses.length > 1 ? roleResponses.shift() : roleResponses[0],
+    }),
     sendMessageWithPromise: async (_tokenId, command, params) => {
       commands.push({ command, params });
       if (command === "store_goodslist") return marketState;
@@ -45,17 +47,7 @@ const createStorePurchaseHarness = ({
   return { ...tasks, commands, logs, tokenStatus };
 };
 
-test("识别黑市没有可采购商品错误码", () => {
-  assert.equal(
-    isNoPurchasableStoreGoodsError(
-      new Error("服务器错误: 1300040 - 未知错误"),
-    ),
-    true,
-  );
-  assert.equal(isNoPurchasableStoreGoodsError(new Error("连接超时")), false);
-});
-
-test("4000级以下按服务器黑市状态确认已买后直接返回成功", async () => {
+test("一键黑市购买先检查日常，已完成时不再发送黑市命令", async () => {
   const harness = createStorePurchaseHarness({
     roleData: { levelId: 3999, dailyTask: { complete: { 12: -1 } } },
     marketState: {
@@ -66,28 +58,33 @@ test("4000级以下按服务器黑市状态确认已买后直接返回成功", a
 
   await harness.store_purchase();
 
-  assert.deepEqual(harness.commands, [
-    { command: "store_goodslist", params: { storeId: 1 } },
-  ]);
+  assert.deepEqual(harness.commands, []);
   assert.equal(harness.tokenStatus.value["role-1"], "completed");
-  assert.ok(harness.logs.some(({ message }) => message.includes("当前刷新1次")));
+  assert.ok(harness.logs.some(({ message }) => message.includes("已经完成")));
 });
 
-test("清单采购已满足时1300040按成功处理", async () => {
+test("一键黑市购买与日常共用清单失败后复查并兜底的逻辑", async () => {
   const harness = createStorePurchaseHarness({
-    roleData: { levelId: 4000, dailyTask: { complete: { 12: -1 } } },
+    roleData: [
+      { levelId: 4000, dailyTask: { complete: { 12: 0 } } },
+      { levelId: 4000, dailyTask: { complete: { 12: 0 } } },
+    ],
+    marketState: {
+      goodsList: { 1: { buy_quantity: 0 }, 3: { buy_quantity: 0 } },
+      refresh: 0,
+    },
     purchaseError: new Error("服务器错误: 1300040 - 未知错误"),
   });
 
   await harness.store_purchase();
 
   assert.deepEqual(harness.commands, [
+    { command: "store_goodslist", params: { storeId: 1 } },
     { command: "store_purchase", params: {} },
+    { command: "store_buy", params: { goodsId: 1 } },
   ]);
   assert.equal(harness.tokenStatus.value["role-1"], "completed");
-  assert.ok(
-    harness.logs.some(({ message }) => message.includes("没有可采购商品")),
-  );
+  assert.ok(harness.logs.some(({ message }) => message.includes("青铜宝箱")));
 });
 
 test("从当前限时商店动态识别唯一免费档位", () => {

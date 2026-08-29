@@ -50,6 +50,9 @@ test("4000级以下按青铜铂金刷新青铜铂金的顺序购买", async () =
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-low-level", name: "低等级账号" }],
+      sendGetRoleInfo: async () => ({
+        role: { levelId: 3999, dailyTask: { complete: { 12: 0 } } },
+      }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
         if (command === "store_goodslist") return states.shift();
@@ -86,6 +89,9 @@ test("低等级首轮宝箱都未买成功时不刷新黑市", async () => {
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-low-level", name: "低等级账号" }],
+      sendGetRoleInfo: async () => ({
+        role: { levelId: 3999, dailyTask: { complete: { 12: 0 } } },
+      }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
         if (command === "store_goodslist") return marketState(0);
@@ -108,11 +114,14 @@ test("低等级首轮宝箱都未买成功时不刷新黑市", async () => {
   ]);
 });
 
-test("低等级账号以服务器状态判断已刷新且已购买时不重复操作", async () => {
+test("黑市日常已完成时不分等级直接结束", async () => {
   const commands = [];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-low-level", name: "低等级账号" }],
+      sendGetRoleInfo: async () => ({
+        role: { levelId: 3999, dailyTask: { complete: { 12: -1 } } },
+      }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
         return marketState(1, 1, 1);
@@ -126,27 +135,27 @@ test("低等级账号以服务器状态判断已刷新且已购买时不重复�
   });
 
   assert.deepEqual(result, {
-    lowLevelFlow: true,
-    completed: true,
-    firstRoundPurchased: true,
-    refreshed: false,
-    refreshCount: 1,
+    dailyTaskCompleted: true,
+    skipped: true,
   });
-  assert.deepEqual(commands, [
-    { command: "store_goodslist", params: { storeId: 1 } },
-  ]);
+  assert.deepEqual(commands, []);
 });
 
 test("黑市清单未购得商品时补买200金砖青铜宝箱", async () => {
   const commands = [];
+  const roleStates = [0, 0];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-market", name: "黑市测试账号" }],
       sendGetRoleInfo: async () => ({
-        role: { dailyTask: { complete: { [BLACK_MARKET_DAILY_TASK_ID]: 0 } } },
+        role: {
+          levelId: 4000,
+          dailyTask: { complete: { [BLACK_MARKET_DAILY_TASK_ID]: roleStates.shift() } },
+        },
       }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
+        if (command === "store_goodslist") return marketState(0);
         return {};
       },
     },
@@ -155,8 +164,14 @@ test("黑市清单未购得商品时补买200金砖青铜宝箱", async () => {
 
   const result = await runner.purchaseBlackMarketDailyItem("role-market");
 
-  assert.deepEqual(result, { fallbackPurchased: true });
+  assert.deepEqual(result, {
+    dailyTaskCompleted: false,
+    purchaseListExecuted: true,
+    fallbackPurchased: true,
+    refreshCount: 0,
+  });
   assert.deepEqual(commands, [
+    { command: "store_goodslist", params: { storeId: 1 } },
     { command: "store_purchase", params: {} },
     {
       command: "store_buy",
@@ -165,16 +180,21 @@ test("黑市清单未购得商品时补买200金砖青铜宝箱", async () => {
   ]);
 });
 
-test("黑市清单已完成购买任务时不再补买青铜宝箱", async () => {
+test("清单采购成功完成黑市日常时不再补买青铜宝箱", async () => {
   const commands = [];
+  const roleStates = [0, -1];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-market", name: "黑市测试账号" }],
       sendGetRoleInfo: async () => ({
-        role: { dailyTask: { complete: { [BLACK_MARKET_DAILY_TASK_ID]: -1 } } },
+        role: {
+          levelId: 4000,
+          dailyTask: { complete: { [BLACK_MARKET_DAILY_TASK_ID]: roleStates.shift() } },
+        },
       }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
+        if (command === "store_goodslist") return marketState(0);
         return {};
       },
     },
@@ -183,20 +203,60 @@ test("黑市清单已完成购买任务时不再补买青铜宝箱", async () =>
 
   const result = await runner.purchaseBlackMarketDailyItem("role-market");
 
-  assert.deepEqual(result, { fallbackPurchased: false });
-  assert.deepEqual(commands, [{ command: "store_purchase", params: {} }]);
+  assert.deepEqual(result, {
+    dailyTaskCompleted: true,
+    purchaseListExecuted: true,
+    fallbackPurchased: false,
+    refreshCount: 0,
+  });
+  assert.deepEqual(commands, [
+    { command: "store_goodslist", params: { storeId: 1 } },
+    { command: "store_purchase", params: {} },
+  ]);
+});
+
+test("4000级以上已刷新过时跳过清单采购并直接买青铜宝箱", async () => {
+  const commands = [];
+  const runner = new DailyTaskRunner(
+    {
+      gameTokens: [{ id: "role-market", name: "黑市测试账号" }],
+      sendGetRoleInfo: async () => ({
+        role: { levelId: 4000, dailyTask: { complete: { 12: 0 } } },
+      }),
+      sendMessageWithPromise: async (_tokenId, command, params) => {
+        commands.push({ command, params });
+        if (command === "store_goodslist") return marketState(1);
+        return {};
+      },
+    },
+    { commandDelay: 0, taskDelay: 0 },
+  );
+
+  const result = await runner.purchaseBlackMarketDailyItem("role-market");
+
+  assert.equal(result.refreshCount, 1);
+  assert.equal(result.fallbackPurchased, true);
+  assert.deepEqual(commands, [
+    { command: "store_goodslist", params: { storeId: 1 } },
+    { command: "store_buy", params: { goodsId: BRONZE_CHEST_GOODS_ID } },
+  ]);
 });
 
 test("清单采购接口不可用时仍复查任务并补买青铜宝箱", async () => {
   const commands = [];
+  const roleStates = [0, 0];
   const runner = new DailyTaskRunner(
     {
       gameTokens: [{ id: "role-low-level", name: "低等级账号" }],
       sendGetRoleInfo: async () => ({
-        role: { dailyTask: { complete: { [BLACK_MARKET_DAILY_TASK_ID]: 0 } } },
+        role: {
+          levelId: 4000,
+          dailyTask: { complete: { [BLACK_MARKET_DAILY_TASK_ID]: roleStates.shift() } },
+        },
       }),
       sendMessageWithPromise: async (_tokenId, command, params) => {
         commands.push({ command, params });
+        if (command === "store_goodslist") return marketState(0);
         if (command === "store_purchase") {
           throw new Error("功能未解锁");
         }
@@ -208,8 +268,9 @@ test("清单采购接口不可用时仍复查任务并补买青铜宝箱", async
 
   const result = await runner.purchaseBlackMarketDailyItem("role-low-level");
 
-  assert.deepEqual(result, { fallbackPurchased: true });
+  assert.equal(result.fallbackPurchased, true);
   assert.deepEqual(commands, [
+    { command: "store_goodslist", params: { storeId: 1 } },
     { command: "store_purchase", params: {} },
     {
       command: "store_buy",
@@ -236,9 +297,9 @@ test("无法准确刷新黑市任务状态时不执行兜底购买", async () =>
 
   await assert.rejects(
     runner.purchaseBlackMarketDailyItem("role-refresh-failed"),
-    /为避免重复购买已停止兜底/,
+    /无法读取黑市日常任务状态/,
   );
-  assert.deepEqual(commands, [{ command: "store_purchase", params: {} }]);
+  assert.deepEqual(commands, []);
 });
 
 test("每日活跃达到或超过100时视为已完成", () => {

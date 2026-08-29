@@ -313,9 +313,51 @@ export class DailyTaskRunner {
     };
   }
 
-  async purchaseBlackMarketDailyItem(tokenId, roleData = null) {
-    if (roleData && !canUseStorePurchaseList(roleData)) {
+  async purchaseBlackMarketDailyItem(tokenId) {
+    this.log("刷新并检查黑市购买日常任务状态...");
+    let roleInfoResp;
+    try {
+      roleInfoResp = await this.tokenStore.sendGetRoleInfo(tokenId);
+    } catch (error) {
+      throw new Error(`无法读取黑市日常任务状态: ${error.message}`);
+    }
+
+    const roleData = roleInfoResp?.role;
+    const completedTasks = roleData?.dailyTask?.complete ?? {};
+    if (completedTasks[BLACK_MARKET_DAILY_TASK_ID] === -1) {
+      this.log("黑市购买日常任务已经完成，无需再次执行", "success");
+      return { dailyTaskCompleted: true, skipped: true };
+    }
+
+    if (!canUseStorePurchaseList(roleData)) {
       return this.buyLowLevelBlackMarketChests(tokenId);
+    }
+
+    const stateResponse = await this.executeGameCommand(
+      tokenId,
+      "store_goodslist",
+      { storeId: 1 },
+      "读取黑市实际刷新次数",
+    );
+    const state = parseBlackMarketState(stateResponse);
+
+    if (state.refresh > 0) {
+      this.log(
+        `服务器显示今日黑市已刷新${state.refresh}次，视为已执行过清单采购，直接购买青铜宝箱`,
+        "warning",
+      );
+      await this.executeGameCommand(
+        tokenId,
+        "store_buy",
+        { goodsId: BRONZE_CHEST_GOODS_ID },
+        "购买200金砖青铜宝箱",
+      );
+      return {
+        dailyTaskCompleted: false,
+        purchaseListExecuted: true,
+        fallbackPurchased: true,
+        refreshCount: state.refresh,
+      };
     }
 
     try {
@@ -332,8 +374,7 @@ export class DailyTaskRunner {
       );
     }
 
-    this.log("检查黑市购买日常任务是否完成...");
-    let roleInfoResp;
+    this.log("清单采购后重新检查黑市购买日常任务...");
     try {
       roleInfoResp = await this.tokenStore.sendGetRoleInfo(tokenId);
     } catch (error) {
@@ -341,11 +382,16 @@ export class DailyTaskRunner {
         `无法刷新黑市日常任务状态，为避免重复购买已停止兜底: ${error.message}`,
       );
     }
-    const completedTasks = roleInfoResp?.role?.dailyTask?.complete ?? {};
+    const refreshedCompletedTasks = roleInfoResp?.role?.dailyTask?.complete ?? {};
 
-    if (completedTasks[BLACK_MARKET_DAILY_TASK_ID] === -1) {
+    if (refreshedCompletedTasks[BLACK_MARKET_DAILY_TASK_ID] === -1) {
       this.log("清单采购已完成黑市购买日常任务", "success");
-      return { fallbackPurchased: false };
+      return {
+        dailyTaskCompleted: true,
+        purchaseListExecuted: true,
+        fallbackPurchased: false,
+        refreshCount: 0,
+      };
     }
 
     this.log(
@@ -358,7 +404,12 @@ export class DailyTaskRunner {
       { goodsId: BRONZE_CHEST_GOODS_ID },
       "购买200金砖青铜宝箱",
     );
-    return { fallbackPurchased: true };
+    return {
+      dailyTaskCompleted: false,
+      purchaseListExecuted: true,
+      fallbackPurchased: true,
+      refreshCount: 0,
+    };
   }
 
   loadSettings(roleId) {
@@ -817,7 +868,7 @@ export class DailyTaskRunner {
     if (!isTaskCompleted(12) && settings.blackMarketPurchase) {
       taskList.push({
         name: "黑市购买1次物品",
-        execute: () => this.purchaseBlackMarketDailyItem(tokenId, roleData),
+        execute: () => this.purchaseBlackMarketDailyItem(tokenId),
       });
     }
 

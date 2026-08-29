@@ -4,9 +4,7 @@
  * collection_claimfreereward, activity_claimweeklyfree
  */
 
-import { DailyTaskRunner, canUseStorePurchaseList } from "../dailyTaskRunner.js";
-export const isNoPurchasableStoreGoodsError = (error) =>
-  /(?:^|\D)1300040(?:\D|$)/.test(String(error?.message ?? error ?? ""));
+import { DailyTaskRunner } from "../dailyTaskRunner.js";
 
 /**
  * 从 activity_get 返回值中提取当前单周限时商店的免费商品。
@@ -378,72 +376,26 @@ export function createTasksStore(deps) {
 
         await ensureConnection(tokenId);
 
-        const roleInfo = await tokenStore.sendGetRoleInfo(tokenId);
-        const roleData = roleInfo?.role;
-
-        if (roleData && !canUseStorePurchaseList(roleData)) {
-          const runner = new DailyTaskRunner(tokenStore, {
-            commandDelay: delayConfig.action,
-            taskDelay: delayConfig.action,
-          });
-          runner.callbacks = { onLog: addLog };
-          const lowLevelResult =
-            await runner.buyLowLevelBlackMarketChests(tokenId);
-
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 低等级黑市已按服务器实际状态处理完成（当前刷新${lowLevelResult.refreshCount}次）`,
-            type: "success",
-          });
-          tokenStatus.value[tokenId] = "completed";
-          return;
-        }
+        const runner = new DailyTaskRunner(tokenStore, {
+          commandDelay: delayConfig.action,
+          taskDelay: delayConfig.action,
+        });
+        runner.callbacks = { onLog: addLog };
+        await runner.purchaseBlackMarketDailyItem(tokenId);
 
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `${token.name} 发送黑市采购请求...`,
-          type: "info",
+          message: `${token.name} 黑市购买流程处理完成`,
+          type: "success",
         });
-        const result = await tokenStore.sendMessageWithPromise(
-          tokenId,
-          "store_purchase",
-          {},
-          5000,
-        );
-
-        await new Promise((r) => setTimeout(r, delayConfig.action));
-
-        if (result.error) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 黑市采购失败: ${result.error}`,
-            type: "error",
-          });
-          tokenStatus.value[tokenId] = "failed";
-        } else {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 黑市采购成功`,
-            type: "success",
-          });
-          tokenStatus.value[tokenId] = "completed";
-        }
+        tokenStatus.value[tokenId] = "completed";
       } catch (error) {
-        if (isNoPurchasableStoreGoodsError(error)) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 已按清单购买或当前没有可采购商品`,
-            type: "success",
-          });
-          tokenStatus.value[tokenId] = "completed";
-        } else {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 黑市采购过程出错: ${error.message}`,
-            type: "error",
-          });
-          tokenStatus.value[tokenId] = "failed";
-        }
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `${token.name} 黑市采购过程出错: ${error.message}`,
+          type: "error",
+        });
+        tokenStatus.value[tokenId] = "failed";
       } finally {
         tokenStore.closeWebSocketConnection(tokenId);
         releaseConnectionSlot();
