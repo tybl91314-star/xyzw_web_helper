@@ -45,6 +45,17 @@ const getTodayBossId = () => {
 
 export const DAILY_ACTIVITY_TARGET = 100;
 
+// complete 保存任务进度，-1 表示已领取。实际任务 ID 并非连续的 1～10。
+export const DAILY_TASK_TARGETS = Object.freeze({
+  1: 1, 2: 1, 3: 3, 4: 2, 5: 5, 6: 3, 7: 3, 12: 1, 13: 1, 14: 1,
+});
+export const getClaimableDailyTaskIds = (role) =>
+  Object.entries(DAILY_TASK_TARGETS)
+    .filter(([id, target]) => Number(role?.dailyTask?.complete?.[id]) >= target)
+    .map(([id]) => Number(id));
+
+const isNoRewardError = (error) => /3500020|没有可领取的奖励/.test(error?.message || "");
+
 export const getDailyActivityPoint = (roleData) => {
   const dailyPoint = Number(roleData?.dailyTask?.dailyPoint ?? 0);
   return Number.isFinite(dailyPoint) ? dailyPoint : 0;
@@ -204,6 +215,44 @@ export class DailyTaskRunner {
     }
   }
 
+  async prepareConnection(tokenId) {
+    if (this.callbacks?.shouldStop?.()) {
+      const error = new Error("任务已停止");
+      error.retryable = false;
+      throw error;
+    }
+    if (this.tokenStore.getWebSocketStatus &&
+        this.tokenStore.getWebSocketStatus(tokenId) !== "connected") {
+      if (!this.callbacks?.ensureConnection) throw new Error("WebSocket未连接");
+      this.log("连接已断开，重新建立连接后继续", "warning");
+      await this.callbacks.ensureConnection();
+    }
+  }
+
+  async readDailyRole(tokenId) {
+    await this.prepareConnection(tokenId);
+    const response = await this.tokenStore.sendGetRoleInfo(tokenId);
+    if (!response?.role?.dailyTask) throw new Error("无法核验每日任务：角色响应缺少dailyTask");
+    return response.role;
+  }
+
+  async claimDailyPoints(tokenId) {
+    // 响应丢失或领取失败后复查服务器，只补领，绝不重跑购买动作。
+    for (let round = 0; round < 2; round++) {
+      const ids = getClaimableDailyTaskIds(await this.readDailyRole(tokenId));
+      if (!ids.length) return;
+      for (const taskId of ids) {
+        try {
+          await this.executeGameCommand(tokenId, "task_claimdailypoint", { taskId }, `领取任务奖励${taskId}`);
+        } catch (error) {
+          this.log(`任务${taskId}领取未确认，将按服务器状态复查: ${error.message}`, "warning");
+        }
+      }
+    }
+    const pending = getClaimableDailyTaskIds(await this.readDailyRole(tokenId));
+    if (pending.length) throw new Error(`仍有已完成未领取的每日任务: ${pending.join("、")}`);
+  }
+
   async executeGameCommand(
     tokenId,
     cmd,
@@ -212,6 +261,7 @@ export class DailyTaskRunner {
     timeout = 8000,
   ) {
     try {
+      await this.prepareConnection(tokenId);
       if (description) this.log(`执行: ${description}`);
       const result = await this.tokenStore.sendMessageWithPromise(
         tokenId,
@@ -389,6 +439,7 @@ export class DailyTaskRunner {
     this.log("刷新并检查黑市购买日常任务状态...");
     let roleInfoResp;
     try {
+      await this.prepareConnection(tokenId);
       roleInfoResp = await this.tokenStore.sendGetRoleInfo(tokenId);
     } catch (error) {
       throw new Error(`无法读取黑市日常任务状态: ${error.message}`);
@@ -540,7 +591,8 @@ export class DailyTaskRunner {
     this.log("开始执行每日任务补差");
 
     const completedTasks = roleData.dailyTask?.complete ?? {};
-    const isTaskCompleted = (taskId) => completedTasks[taskId] === -1;
+    const isTaskCompleted = (taskId) => Number(completedTasks[taskId]) === -1 ||
+      Number(completedTasks[taskId]) >= DAILY_TASK_TARGETS[taskId];
     const statistics = roleData.statistics ?? {};
     const statisticsTime = roleData.statisticsTime ?? {};
 
@@ -979,26 +1031,15 @@ export class DailyTaskRunner {
       });
     }
 
-    // 7. 任务奖励
-    for (let taskId = 1; taskId <= 10; taskId++) {
-      taskList.push({
-        name: `领取任务奖励${taskId}`,
-        execute: () =>
-          this.executeGameCommand(
-            tokenId,
-            "task_claimdailypoint",
-            { taskId },
-            `领取任务奖励${taskId}`,
-            5000,
-          ),
-      });
-    }
+    // 所有日常动作完成后，再按服务器实际进度领取积分。
+    taskList.push({ name: "领取已完成的每日任务积分", execute: () => this.claimDailyPoints(tokenId) });
 
     // 每日活跃奖励必须是整个流程的最后一步，确保中断重跑时仍能通过
     // dailyPoint 判断出哪些账号尚未完成。
     taskList.push(
       ...FINAL_REWARD_TASKS.map((task) => ({
         name: task.name,
+        reward: true,
         execute: () =>
           this.executeGameCommand(
             tokenId,
@@ -1011,21 +1052,42 @@ export class DailyTaskRunner {
 
     // 执行
     const totalTasks = taskList.length;
+    const failures = [];
     this.log(`共有 ${totalTasks} 个任务待执行`);
 
     for (let i = 0; i < taskList.length; i++) {
       const task = taskList[i];
       try {
         await task.execute();
-        const progress = Math.floor(((i + 1) / totalTasks) * 100);
+        const progress = Math.min(99, Math.floor(((i + 1) / totalTasks) * 100));
         if (this.callbacks?.onProgress) this.callbacks.onProgress(progress);
         await new Promise((resolve) => setTimeout(resolve, this.delaySettings.taskDelay));
       } catch (error) {
+        if (this.callbacks?.shouldStop?.()) throw error;
+        if (task.reward && isNoRewardError(error)) {
+          this.log(`${task.name}：没有待领取奖励`, "info");
+          continue;
+        }
+        if (this.tokenStore.getWebSocketStatus &&
+            this.tokenStore.getWebSocketStatus(tokenId) !== "connected") throw error;
+        failures.push(task.name);
         this.log(`任务执行失败: ${task.name} - ${error.message}`, "error");
       }
     }
 
+    const finalRole = await this.readDailyRole(tokenId);
+    const finalPoint = getDailyActivityPoint(finalRole);
+    const pending = getClaimableDailyTaskIds(finalRole);
+    this.log(`最终核验每日活跃: ${finalPoint}/${DAILY_ACTIVITY_TARGET}，待领取任务: ${pending.join("、") || "无"}`);
+    if (finalPoint < DAILY_ACTIVITY_TARGET || pending.length || failures.length) {
+      const error = new Error(`日常未全部完成：活跃${finalPoint}/100` +
+        (pending.length ? `，待领取任务${pending.join("、")}` : "") +
+        (failures.length ? `，失败步骤：${failures.join("、")}` : ""));
+      error.retryable = false;
+      throw error;
+    }
     if (this.callbacks?.onProgress) this.callbacks.onProgress(100);
-    this.log("所有任务执行完成", "success");
+    this.log("所有任务执行完成，每日活跃领取已核验", "success");
+    return { skipped: false, dailyPoint: finalPoint };
   }
 }

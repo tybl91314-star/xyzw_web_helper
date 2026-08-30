@@ -2488,6 +2488,8 @@ import {
 import { useTokenStore, gameTokens, tokenGroups } from "@/stores/tokenStore";
 import { $emit } from "@/stores/events/index.ts";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
+import { accountTaskQueue } from "@/utils/batch/accountTaskQueue.js";
+import { createTaskExecutionController } from "@/utils/batch/taskExecution.js";
 import { preloadQuestions } from "@/utils/studyQuestionsFromJSON.js";
 import { useMessage } from "naive-ui";
 import { Refresh, Settings } from "@vicons/ionicons5";
@@ -3919,22 +3921,7 @@ const healthCheck = () => {
     startScheduler();
   }
 
-  // Add a safety mechanism to prevent isRunning from being stuck
-  if (isRunning.value) {
-    const now = Date.now();
-    const tenMinutesAgo = now - 10 * 60 * 1000; // 10 minutes ago
-    if (lastTaskExecution && lastTaskExecution < tenMinutesAgo) {
-      console.error(
-        `[${new Date().toISOString()}] isRunning has been true for more than 10 minutes, resetting to false`,
-      );
-      isRunning.value = false;
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: "=== 检测到任务执行超时，已重置isRunning状态 ===",
-        type: "warning",
-      });
-    }
-  }
+  // 运行状态由实际执行上下文维护，长任务不能被计时器强行标为空闲。
 
   // Check for page refresh
   if (batchSettings.enableRefresh && batchSettings.refreshInterval > 0) {
@@ -4171,7 +4158,7 @@ const verifyTaskDependencies = async (task) => {
         batchUseItems: "batchWeirdTowerItemMerge",
         batchMergeItems: "batchWeirdTowerItemMerge",
       }[taskName] || taskName;
-    const taskFunction = eval(resolvedTaskName);
+    const taskFunction = batchTaskRegistry[resolvedTaskName];
     if (typeof taskFunction !== "function") {
       addLog({
         time: new Date().toLocaleTimeString(),
@@ -4210,6 +4197,8 @@ const verifyTaskDependencies = async (task) => {
 
 // Execute a scheduled task with dependency verification
 const executeScheduledTask = async (task) => {
+  task = JSON.parse(JSON.stringify(task));
+  const execution = createExecution();
   refreshActivityClock();
   addLog({
     time: new Date().toLocaleTimeString(),
@@ -4268,10 +4257,9 @@ const executeScheduledTask = async (task) => {
     );
 
     for (let batchIndex = 0; batchIndex < accountBatches.length; batchIndex++) {
-      if (shouldStop.value) break;
+      if (execution.cancelled) break;
 
       const currentBatch = accountBatches[batchIndex];
-      selectedTokens.value = [...currentBatch];
       addLog({
         time: new Date().toLocaleTimeString(),
         message: `定时任务 ${task.name}：执行第 ${batchIndex + 1}/${accountBatches.length} 批，共 ${currentBatch.length} 个账号`,
@@ -4280,7 +4268,7 @@ const executeScheduledTask = async (task) => {
 
       // 同一批内沿用原有执行方式；下一批必须等待本批全部结束。
       const taskPromises = task.selectedTasks.map(async (taskName) => {
-      if (shouldStop.value) return;
+      if (execution.cancelled) return;
 
       if (
         ["batchbaoku45", "batchbaoku13"].includes(taskName) &&
@@ -4370,7 +4358,7 @@ const executeScheduledTask = async (task) => {
           batchUseItems: "batchWeirdTowerItemMerge",
           batchMergeItems: "batchWeirdTowerItemMerge",
         }[taskName] || taskName;
-      const taskFunction = eval(resolvedTaskName);
+      const taskFunction = batchTaskRegistry[resolvedTaskName];
       if (typeof taskFunction === "function") {
         // For batch operations, pass isScheduledTask = true
         // 具体的batch任务函数内部会使用ensureConnection管理并行连接
@@ -4383,9 +4371,9 @@ const executeScheduledTask = async (task) => {
             "batchLegacyGiftSendEnhanced",
           ].includes(taskName)
         ) {
-          await taskFunction(true);
+          await taskFunction.runFor(currentBatch, [true], execution);
         } else {
-          await taskFunction();
+          await taskFunction.runFor(currentBatch, [], execution);
         }
       } else {
         addLog({
@@ -4399,7 +4387,7 @@ const executeScheduledTask = async (task) => {
       await Promise.all(taskPromises);
 
       const hasNextBatch = batchIndex < accountBatches.length - 1;
-      if (hasNextBatch && !shouldStop.value && batchIntervalMs > 0) {
+      if (hasNextBatch && !execution.cancelled && batchIntervalMs > 0) {
         const intervalMinutes =
           task.batchIntervalMinutes ?? defaultTaskForm.batchIntervalMinutes;
         addLog({
@@ -4407,14 +4395,19 @@ const executeScheduledTask = async (task) => {
           message: `第 ${batchIndex + 1} 批执行完成，等待 ${intervalMinutes} 分钟后执行下一批`,
           type: "info",
         });
-        await new Promise((resolve) => setTimeout(resolve, batchIntervalMs));
+        const nextBatchAt = Date.now() + batchIntervalMs;
+        while (!execution.cancelled && Date.now() < nextBatchAt) {
+          await new Promise((resolve) => setTimeout(resolve, Math.min(500, nextBatchAt - Date.now())));
+        }
       }
     }
 
     addLog({
       time: new Date().toLocaleTimeString(),
-      message: `=== 定时任务执行完成: ${task.name} ===`,
-      type: "success",
+      message: execution.cancelled
+        ? `=== 定时任务已停止: ${task.name} ===`
+        : `=== 定时任务 ${task.name} 执行结束，失败账号任务数: ${execution.failed} ===`,
+      type: execution.cancelled || execution.failed ? "warning" : "success",
     });
   } catch (error) {
     addLog({
@@ -4426,6 +4419,8 @@ const executeScheduledTask = async (task) => {
       `[${new Date().toISOString()}] Error executing scheduled task ${task.name}:`,
       error,
     );
+  } finally {
+    finishExecution(execution);
   }
 };
 
@@ -4504,143 +4499,147 @@ const queryRecipientInfo = async () => {
     type: "info",
   });
 
-  try {
-    // 确保WebSocket连接
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `正在建立WebSocket连接...`,
-      type: "info",
-    });
+  await accountTaskQueue.run(firstTokenId, async () => {
+    try {
+      // 确保WebSocket连接
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `正在建立WebSocket连接...`,
+        type: "info",
+      });
 
-    // 使用现有的ensureConnection函数，它已经包含了重连机制
-    await ensureConnection(firstTokenId);
-
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `WebSocket连接成功`,
-      type: "success",
-    });
-
-    // 发送查询命令
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `正在发送查询命令，接收者ID: ${recipientId}`,
-      type: "info",
-    });
-
-    // 延长超时时间到10秒，确保有足够时间处理
-    const resp = await tokenStore.sendMessageWithPromise(
-      firstTokenId,
-      "rank_getroleinfo",
-      {
-        bottleType: 0,
-        includeBottleTeam: false,
-        isSearch: false,
-        roleId: recipientId,
-      },
-      10000,
-    );
-
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `查询命令发送成功，正在处理响应...`,
-      type: "info",
-    });
-
-    // 处理查询结果
-    console.log("rank_getroleinfo 响应结果:", resp);
-
-    // 兼容不同的响应结构
-    const roleData = resp?.role || resp?.roleInfo;
-
-    if (roleData) {
-      // 构建完整的角色信息，移除等级和VIP字段
-      recipientInfo.value = {
-        roleId: roleData.roleId || roleData.role?.roleId,
-        name: roleData.name || roleData.role?.name,
-        // 添加头像URL
-        avatarUrl:
-          resp?.roleInfo?.headImg ||
-          roleData?.headImg ||
-          roleData?.role?.headImg ||
-          "",
-        // 战力转换为亿为单位
-        power: (function (p) {
-          const billion = 100000000;
-          return (p / billion).toFixed(2);
-        })(roleData.power || roleData.role?.power || 0),
-        powerUnit: "亿",
-        // 扩展更多角色信息
-        serverName: roleData.serverName || roleData.role?.serverName || "",
-        legionName: resp?.legionInfo?.name || "",
-        legionId: resp?.legionInfo?.id || 0,
-      };
-
-      // 格式化角色名，处理特殊字符
-      const displayName = recipientInfo.value.name || "未知角色";
+      // 使用现有的ensureConnection函数，它已经包含了重连机制
+      await ensureConnection(firstTokenId);
 
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `=== 查询成功: 找到角色 ${displayName} (ID: ${recipientInfo.value.roleId})，战力: ${recipientInfo.value.power}${recipientInfo.value.powerUnit} ===`,
+        message: `WebSocket连接成功`,
         type: "success",
       });
 
-      message.success("查询成功");
-    } else {
-      const errorMsg = "未找到该角色信息";
-      recipientIdError.value = errorMsg;
+      // 发送查询命令
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `正在发送查询命令，接收者ID: ${recipientId}`,
+        type: "info",
+      });
+
+      // 延长超时时间到10秒，确保有足够时间处理
+      const resp = await tokenStore.sendMessageWithPromise(
+        firstTokenId,
+        "rank_getroleinfo",
+        {
+          bottleType: 0,
+          includeBottleTeam: false,
+          isSearch: false,
+          roleId: recipientId,
+        },
+        10000,
+      );
 
       addLog({
         time: new Date().toLocaleTimeString(),
-        message: `=== 查询失败: ${errorMsg} ===`,
-        type: "error",
+        message: `查询命令发送成功，正在处理响应...`,
+        type: "info",
       });
 
+      // 处理查询结果
+      console.log("rank_getroleinfo 响应结果:", resp);
+
+      // 兼容不同的响应结构
+      const roleData = resp?.role || resp?.roleInfo;
+
+      if (roleData) {
+        // 构建完整的角色信息，移除等级和VIP字段
+        recipientInfo.value = {
+          roleId: roleData.roleId || roleData.role?.roleId,
+          name: roleData.name || roleData.role?.name,
+          // 添加头像URL
+          avatarUrl:
+            resp?.roleInfo?.headImg ||
+            roleData?.headImg ||
+            roleData?.role?.headImg ||
+            "",
+          // 战力转换为亿为单位
+          power: (function (p) {
+            const billion = 100000000;
+            return (p / billion).toFixed(2);
+          })(roleData.power || roleData.role?.power || 0),
+          powerUnit: "亿",
+          // 扩展更多角色信息
+          serverName: roleData.serverName || roleData.role?.serverName || "",
+          legionName: resp?.legionInfo?.name || "",
+          legionId: resp?.legionInfo?.id || 0,
+        };
+
+        // 格式化角色名，处理特殊字符
+        const displayName = recipientInfo.value.name || "未知角色";
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 查询成功: 找到角色 ${displayName} (ID: ${recipientInfo.value.roleId})，战力: ${recipientInfo.value.power}${recipientInfo.value.powerUnit} ===`,
+          type: "success",
+        });
+
+        message.success("查询成功");
+      } else {
+        const errorMsg = "未找到该角色信息";
+        recipientIdError.value = errorMsg;
+
+        addLog({
+          time: new Date().toLocaleTimeString(),
+          message: `=== 查询失败: ${errorMsg} ===`,
+          type: "error",
+        });
+
+        message.error(errorMsg);
+      }
+    } catch (error) {
+      // 详细的错误处理
+      console.error("查询接收者信息失败:", error);
+
+      let errorMsg = "查询失败";
+      let logType = "error";
+
+      // 根据错误类型提供更友好的错误信息
+      if (error.message.includes("连接失败")) {
+        errorMsg = "WebSocket连接失败，请检查网络或账号状态";
+      } else if (
+        error.message.includes("timeout") ||
+        error.message.includes("超时")
+      ) {
+        errorMsg = "查询超时，请稍后重试";
+        logType = "warning";
+      } else if (error.message.includes("200160")) {
+        errorMsg = "功法系统未开启";
+      } else {
+        errorMsg = `查询失败: ${error.message}`;
+      }
+
+      recipientIdError.value = errorMsg;
+
+      // 记录错误日志
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== ${errorMsg} ===`,
+        type: logType,
+      });
+
+      // 显示用户友好的错误提示
       message.error(errorMsg);
+    } finally {
+      isQueryingRecipient.value = false;
+      tokenStore.closeWebSocketConnection(firstTokenId);
+      releaseConnectionSlot();
+
+      // 记录查询完成
+      addLog({
+        time: new Date().toLocaleTimeString(),
+        message: `=== 查询操作完成 ===`,
+        type: "info",
+      });
     }
-  } catch (error) {
-    // 详细的错误处理
-    console.error("查询接收者信息失败:", error);
-
-    let errorMsg = "查询失败";
-    let logType = "error";
-
-    // 根据错误类型提供更友好的错误信息
-    if (error.message.includes("连接失败")) {
-      errorMsg = "WebSocket连接失败，请检查网络或账号状态";
-    } else if (
-      error.message.includes("timeout") ||
-      error.message.includes("超时")
-    ) {
-      errorMsg = "查询超时，请稍后重试";
-      logType = "warning";
-    } else if (error.message.includes("200160")) {
-      errorMsg = "功法系统未开启";
-    } else {
-      errorMsg = `查询失败: ${error.message}`;
-    }
-
-    recipientIdError.value = errorMsg;
-
-    // 记录错误日志
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `=== ${errorMsg} ===`,
-      type: logType,
-    });
-
-    // 显示用户友好的错误提示
-    message.error(errorMsg);
-  } finally {
-    isQueryingRecipient.value = false;
-
-    // 记录查询完成
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `=== 查询操作完成 ===`,
-      type: "info",
-    });
-  }
+  });
 };
 
 const confirmLegacyGift = async () => {
@@ -5104,6 +5103,7 @@ const getStatusText = (tokenId) => {
   if (status === "completed") return "已完成";
   if (status === "failed") return "失败";
   if (status === "running") return "执行中";
+  if (status === "stopped") return "已停止";
   return "等待中";
 };
 
@@ -5254,126 +5254,11 @@ const clearLogs = () => {
   message.success("日志已清空");
 };
 
-const waitForConnection = async (
-  tokenId,
-  timeout = batchSettings.connectionTimeout,
-) => {
-  const start = Date.now();
-  while (Date.now() - start < timeout) {
-    const status = tokenStore.getWebSocketStatus(tokenId);
-    if (status === "connected") return true;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  return false;
-};
-
-// 全局连接队列控制 - 限制并发连接数
-const connectionQueue = { active: 0 };
-
-const waitForConnectionSlot = async () => {
-  while (connectionQueue.active >= batchSettings.maxActive) {
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-  connectionQueue.active++;
-};
-
-const releaseConnectionSlot = () => {
-  if (connectionQueue.active > 0) {
-    connectionQueue.active--;
-  }
-};
-
-const ensureConnection = async (tokenId, maxRetries = 2) => {
-  const latestToken = tokens.value.find((t) => t.id === tokenId);
-  if (!latestToken) {
-    throw new Error(`Token not found: ${tokenId}`);
-  }
-
-  let status = tokenStore.getWebSocketStatus(tokenId);
-  let connected = status === "connected";
-
-  if (!connected) {
-    // 等待连接槽位，限制并发连接数
-    await waitForConnectionSlot();
-
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-      type: "info",
-    });
-
-    tokenStore.createWebSocketConnection(
-      tokenId,
-      latestToken.token,
-      latestToken.wsUrl,
-    );
-    connected = await waitForConnection(tokenId);
-
-    if (!connected && maxRetries > 0) {
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `连接超时，尝试重连...`,
-        type: "warning",
-      });
-
-      tokenStore.closeWebSocketConnection(tokenId);
-      await new Promise((r) => setTimeout(r, batchSettings.reconnectDelay));
-
-      addLog({
-        time: new Date().toLocaleTimeString(),
-        message: `正在重连...`,
-        type: "info",
-      });
-
-      const refreshedToken = tokens.value.find((t) => t.id === tokenId);
-      tokenStore.createWebSocketConnection(
-        tokenId,
-        refreshedToken.token,
-        refreshedToken.wsUrl,
-      );
-
-      connected = await waitForConnection(tokenId);
-    }
-
-    if (!connected) {
-      // 连接失败，释放槽位
-      releaseConnectionSlot();
-      throw new Error("连接失败 (重试后仍超时)");
-    }
-  }
-
-  // 连接成功，槽位保持占用，直到任务完成后手动释放
-
-  // Initialize Game Data (Critical for Battle Version and Session)
-  try {
-    // Fetch Role Info first (Standard flow)
-    await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "role_getroleinfo",
-      {},
-      5000,
-    );
-
-    // Fetch Battle Version
-    const res = await tokenStore.sendMessageWithPromise(
-      tokenId,
-      "fight_startlevel",
-      {},
-      5000,
-    );
-    if (res?.battleData?.version) {
-      tokenStore.setBattleVersion(res.battleData.version);
-    }
-  } catch (e) {
-    addLog({
-      time: new Date().toLocaleTimeString(),
-      message: `初始化数据失败: ${e.message}`,
-      type: "warning",
-    });
-  }
-
-  return true;
-};
+// 接收者查询也使用同一个连接槽池；批量任务会覆盖为自己的独立管理器。
+const recipientConnectionManager = createConnectionManager({ tokenStore, batchSettings, addLog });
+const connectionQueue = recipientConnectionManager.connectionQueue;
+const releaseConnectionSlot = recipientConnectionManager.releaseConnectionSlot;
+const ensureConnection = (id) => recipientConnectionManager.ensureConnection(id, tokens.value);
 
 const createTaskDeps = () => ({
   selectedTokens,
@@ -5426,8 +5311,14 @@ const createTaskDeps = () => ({
   loadSettings,
 });
 
+const { createExecution, finishExecution, createQueuedTasks, stopAll } =
+  createTaskExecutionController({
+    createTaskDeps, tokens, selectedTokens, tokenStatus, isRunning,
+    tokenStore, addLog, message, loadSettings,
+  });
+
 // 初始化任务模块
-const tasksHangUp = createTasksHangUp(createTaskDeps());
+const tasksHangUp = createQueuedTasks(createTasksHangUp);
 const {
   claimHangUpRewards,
   batchAddHangUpTime,
@@ -5436,10 +5327,10 @@ const {
   batchWarGuessCheer,
 } = tasksHangUp;
 
-const tasksBottle = createTasksBottle(createTaskDeps());
+const tasksBottle = createQueuedTasks(createTasksBottle);
 const { resetBottles, batchlingguanzi } = tasksBottle;
 
-const tasksTower = createTasksTower(createTaskDeps());
+const tasksTower = createQueuedTasks(createTasksTower);
 const {
   climbTower,
   climbWeirdTower,
@@ -5449,10 +5340,10 @@ const {
   batchWeirdTowerItemMerge,
 } = tasksTower;
 
-const tasksCar = createTasksCar(createTaskDeps());
+const tasksCar = createQueuedTasks(createTasksCar);
 const { batchSmartSendCar, batchDirectSendCar, batchClaimCars } = tasksCar;
 
-const tasksItem = createTasksItem(createTaskDeps());
+const tasksItem = createQueuedTasks(createTasksItem);
 const {
   batchOpenBox,
   batchOpenBoxByPoints,
@@ -5469,14 +5360,14 @@ const {
   batchGenieSweep,
 } = tasksItem;
 
-const tasksDungeon = createTasksDungeon(createTaskDeps());
+const tasksDungeon = createQueuedTasks(createTasksDungeon);
 const { batchbaoku13, batchbaoku45, batchmengjing, batchBuyDreamItems } =
   tasksDungeon;
 
-const tasksArena = createTasksArena(createTaskDeps());
+const tasksArena = createQueuedTasks(createTasksArena);
 const { batcharenafight, batchTopUpFish, batchTopUpArena } = tasksArena;
 
-const tasksStore = createTasksStore(createTaskDeps());
+const tasksStore = createQueuedTasks(createTasksStore);
 const {
   legion_storebuygoods,
   legionStoreBuySkinCoins,
@@ -5485,16 +5376,16 @@ const {
   activity_claimweeklyfree,
 } = tasksStore;
 
-const tasksLegacy = createTasksLegacy(createTaskDeps());
+const tasksLegacy = createQueuedTasks(createTasksLegacy);
 const { batchLegacyClaim, batchLegacyGiftSendEnhanced } = tasksLegacy;
 
-const tasksFootball = createTasksFootball(createTaskDeps());
+const tasksFootball = createQueuedTasks(createTasksFootball);
 const { batchFootballBet } = tasksFootball;
 
-const tasksPKRoom = createTasksPKRoom(createTaskDeps());
+const tasksPKRoom = createQueuedTasks(createTasksPKRoom);
 const { batchMatchAppointment } = tasksPKRoom;
 
-const tasksApexGuess = createTasksApexGuess(createTaskDeps());
+const tasksApexGuess = createQueuedTasks(createTasksApexGuess);
 const { batchApexGuess } = tasksApexGuess;
 
 // 盐杯竞猜 pick 选择
@@ -5512,117 +5403,134 @@ const onFootballPickChange = async (val) => {
   await batchFootballBet(val);
 };
 
-const startBatch = async () => {
-  if (selectedTokens.value.length === 0) return;
+const createDailyTasks = (deps) => {
+  const { selectedTokens, tokens, tokenStatus, isRunning, shouldStop,
+    ensureConnection, releaseConnectionSlot, connectionQueue, batchSettings,
+    tokenStore, addLog, message, currentRunningTokenId, loadSettings } = deps;
+  const startBatch = async () => {
+    if (selectedTokens.value.length === 0) return;
 
-  isRunning.value = true;
-  shouldStop.value = false;
-  // 不再重置logs数组，保留之前的日志
-  // logs.value = [];
+    isRunning.value = true;
+    shouldStop.value = false;
+    // 不再重置logs数组，保留之前的日志
+    // logs.value = [];
 
-  // Reset status
-  selectedTokens.value.forEach((id) => {
-    tokenStatus.value[id] = "waiting";
-  });
+    // Reset status
+    selectedTokens.value.forEach((id) => {
+      tokenStatus.value[id] = "waiting";
+    });
 
-  // 并行执行任务，但通过connectionQueue限制并发连接数
-  const taskPromises = selectedTokens.value.map(async (tokenId) => {
-    if (shouldStop.value) return;
+    // 并行执行任务，但通过connectionQueue限制并发连接数
+    const taskPromises = selectedTokens.value.map(async (tokenId) => {
+      if (shouldStop.value) return;
 
-    tokenStatus.value[tokenId] = "running";
+      tokenStatus.value[tokenId] = "running";
 
-    let retryCount = 0;
-    const MAX_RETRIES = 1;
-    let success = false;
+      let retryCount = 0;
+      const MAX_RETRIES = 1;
+      let success = false;
 
-    while (retryCount <= MAX_RETRIES && !success) {
-      if (shouldStop.value) break;
+      while (retryCount <= MAX_RETRIES && !success) {
+        if (shouldStop.value) break;
 
-      const token = tokens.value.find((t) => t.id === tokenId);
+        const token = tokens.value.find((t) => t.id === tokenId);
 
-      try {
-        if (retryCount === 0) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `=== 开始执行: ${token.name} ===`,
-            type: "info",
+        try {
+          if (retryCount === 0) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `=== 开始执行: ${token.name} ===`,
+              type: "info",
+            });
+          } else {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `=== 尝试重试: ${token.name} (第${retryCount}次) ===`,
+              type: "info",
+            });
+          }
+
+          await ensureConnection(tokenId);
+
+          // Create runner with delay settings
+          const runner = new DailyTaskRunner(tokenStore, {
+            commandDelay: batchSettings.commandDelay,
+            taskDelay: batchSettings.taskDelay,
           });
-        } else {
+
+          // Run tasks
+          await runner.run(tokenId, {
+            shouldStop: () => shouldStop.value,
+            ensureConnection: () => ensureConnection(tokenId),
+            onLog: (log) => addLog(log),
+            onProgress: (p) => {
+              // 每个token维护自己的进度
+            },
+          }, loadSettings(tokenId));
+
+          success = true;
+          tokenStatus.value[tokenId] = "completed";
           addLog({
             time: new Date().toLocaleTimeString(),
-            message: `=== 尝试重试: ${token.name} (第${retryCount}次) ===`,
+            message: `=== ${token.name} 执行完成 ===`,
+            type: "success",
+          });
+        } catch (error) {
+          console.error(error);
+          if (error.retryable !== false && retryCount < MAX_RETRIES && !shouldStop.value) {
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 执行出错: ${error.message}，等待3秒后重试...`,
+              type: "warning",
+            });
+            // Wait for potential token refresh in store
+            await new Promise((r) => setTimeout(r, 3000));
+            retryCount++;
+          } else {
+            tokenStatus.value[tokenId] = "failed";
+            addLog({
+              time: new Date().toLocaleTimeString(),
+              message: `${token.name} 执行失败: ${error.message}`,
+              type: "error",
+            });
+            break;
+          }
+        } finally {
+          // 完成后关闭连接并释放槽位
+          tokenStore.closeWebSocketConnection(tokenId);
+          releaseConnectionSlot();
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
             type: "info",
           });
         }
-
-        await ensureConnection(tokenId);
-
-        // Create runner with delay settings
-        const runner = new DailyTaskRunner(tokenStore, {
-          commandDelay: batchSettings.commandDelay,
-          taskDelay: batchSettings.taskDelay,
-        });
-
-        // Run tasks
-        await runner.run(tokenId, {
-          onLog: (log) => addLog(log),
-          onProgress: (p) => {
-            // 每个token维护自己的进度
-          },
-        });
-
-        success = true;
-        tokenStatus.value[tokenId] = "completed";
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 执行完成 ===`,
-          type: "success",
-        });
-      } catch (error) {
-        console.error(error);
-        if (retryCount < MAX_RETRIES && !shouldStop.value) {
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 执行出错: ${error.message}，等待3秒后重试...`,
-            type: "warning",
-          });
-          // Wait for potential token refresh in store
-          await new Promise((r) => setTimeout(r, 3000));
-          retryCount++;
-        } else {
-          tokenStatus.value[tokenId] = "failed";
-          addLog({
-            time: new Date().toLocaleTimeString(),
-            message: `${token.name} 执行失败: ${error.message}`,
-            type: "error",
-          });
-        }
-      } finally {
-        // 完成后关闭连接并释放槽位
-        tokenStore.closeWebSocketConnection(tokenId);
-        releaseConnectionSlot();
-        addLog({
-          time: new Date().toLocaleTimeString(),
-          message: `${token.name} 连接已关闭  (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
-          type: "info",
-        });
       }
-    }
-  });
+    });
 
-  // 等待所有任务完成
-  await Promise.all(taskPromises);
+    // 等待所有任务完成
+    await Promise.all(taskPromises);
 
-  // 等待所有任务完成后再继续
-  await new Promise((r) => setTimeout(r, 1000));
+    // 等待所有任务完成后再继续
+    await new Promise((r) => setTimeout(r, 1000));
 
-  isRunning.value = false;
-  currentRunningTokenId.value = null;
-  message.success("批量任务执行结束");
+    isRunning.value = false;
+    currentRunningTokenId.value = null;
+    message.success("批量任务执行结束");
+  };
+
+  return { startBatch };
+};
+const { startBatch } = createQueuedTasks(createDailyTasks);
+const batchTaskRegistry = {
+  startBatch, ...tasksHangUp, ...tasksBottle, ...tasksTower, ...tasksCar,
+  ...tasksItem, ...tasksDungeon, ...tasksArena, ...tasksStore, ...tasksLegacy,
+  ...tasksFootball, ...tasksPKRoom, ...tasksApexGuess,
 };
 
 const stopBatch = () => {
   shouldStop.value = true;
+  stopAll();
   addLog({
     time: new Date().toLocaleTimeString(),
     message: "正在停止...",

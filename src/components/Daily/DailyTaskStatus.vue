@@ -286,6 +286,9 @@ import {
 } from "vue";
 import { useTokenStore } from "@/stores/tokenStore";
 import { DailyTaskRunner } from "@/utils/dailyTaskRunner";
+import { accountTaskQueue } from "@/utils/batch/accountTaskQueue.js";
+import { createConnectionManager } from "@/utils/batch/connectionManager.js";
+import { defaultBatchSettings } from "@/utils/batch/constants.js";
 import { useMessage } from "naive-ui";
 import {
   Settings,
@@ -470,11 +473,6 @@ const runDailyFix = async () => {
     return;
   }
 
-  if (!isConnected.value) {
-    message.error("WebSocket连接未建立，请检查连接状态");
-    return;
-  }
-
   busy.value = true;
   showLog.value = true;
   logList.value = [];
@@ -482,35 +480,42 @@ const runDailyFix = async () => {
   try {
     log("=== 开始执行一键补差任务 ===");
 
-    // 使用 DailyTaskRunner 执行任务
+    // 固定本次账号和设置，等待其他入口释放账号后再连接、读取最新活跃。
+    const tokenId = tokenStore.selectedToken.id;
+    const settingsSnapshot = JSON.parse(JSON.stringify(settings));
+    const manager = createConnectionManager({
+      tokenStore, batchSettings: { ...defaultBatchSettings },
+      addLog: (item) => log(item.message, item.type),
+    });
+    await accountTaskQueue.run(tokenId, async () => {
+    try {
+    await manager.ensureConnection(tokenId, tokenStore.gameTokens);
     const runner = new DailyTaskRunner(tokenStore, {
-      commandDelay: settings.commandDelay,
-      taskDelay: settings.taskDelay,
+      commandDelay: settingsSnapshot.commandDelay,
+      taskDelay: settingsSnapshot.taskDelay,
     });
 
     await runner.run(
-      tokenStore.selectedToken.id,
+      tokenId,
       {
+        ensureConnection: () => manager.ensureConnection(tokenId, tokenStore.gameTokens),
         onLog: (logItem) => log(logItem.message, logItem.type),
         onProgress: (progress) => {
           log(`任务进度: ${progress}%`);
         },
       },
-      settings,
-    ); // 传入当前组件的响应式 settings
+      settingsSnapshot,
+    );
+    const response = await tokenStore.sendGetRoleInfo(tokenId);
+    if (tokenStore.selectedToken?.id === tokenId) syncCompleteFromServer(response);
+    } finally {
+      manager.releaseConnectionSlot();
+    }
+    }, { onWaiting: () => log("该账号正在执行其他任务，已排队等待") });
 
     log("=== 任务执行完成 ===", "success");
     message.success("每日任务补差执行完成");
 
-    // 最终刷新角色信息
-    setTimeout(async () => {
-      try {
-        await refreshRoleInfo();
-        log("最终角色信息刷新完成", "success");
-      } catch (error) {
-        log(`最终刷新失败: ${error.message}`, "warning");
-      }
-    }, 3000);
   } catch (error) {
     log(`任务执行失败: ${error.message}`, "error");
     console.error("详细错误信息:", error);

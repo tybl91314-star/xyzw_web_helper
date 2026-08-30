@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { bonProtocol } from "../src/utils/bonProtocol.js";
+import { createAccountTaskQueue } from "../src/utils/batch/accountTaskQueue.js";
 
 import {
   BLACK_MARKET_DAILY_TASK_ID,
@@ -9,10 +10,12 @@ import {
   PLATINUM_CHEST_GOODS_ID,
   STORE_PURCHASE_UNLOCK_LEVEL,
   DAILY_ACTIVITY_TARGET,
+  DAILY_TASK_TARGETS,
   DailyTaskRunner,
   FINAL_REWARD_TASKS,
   canUseStorePurchaseList,
   getDailyActivityPoint,
+  getClaimableDailyTaskIds,
   getBlackMarketBuyQuantity,
   getRemainingLegionBossFights,
   isBlackMarketDailyTaskCompleted,
@@ -434,7 +437,10 @@ test("全部BOSS战斗结束后最后切回竞技场阵容", async () => {
       gameTokens: [{ id: "role-2", name: "阵容测试账号" }],
       sendGetRoleInfo: async () => ({
         role: {
-          dailyTask: { dailyPoint: 0, complete: completedTasks },
+          dailyTask: {
+            dailyPoint: commands.some(({ command }) => command === "task_claimdailyreward") ? 100 : 0,
+            complete: completedTasks,
+          },
           statistics: { "legion:boss": 0 },
           statisticsTime: {},
         },
@@ -481,4 +487,112 @@ test("全部BOSS战斗结束后最后切回竞技场阵容", async () => {
     commands.findLastIndex(({ command }) => command === "presetteam_saveteam") >
       commands.findLastIndex(({ command }) => command === "fight_startboss"),
   );
+});
+
+test("根据实际进度识别待领取任务，包括黑市12、竞技场13和盐罐14", () => {
+  assert.deepEqual(getClaimableDailyTaskIds({
+    dailyTask: { complete: { 1: 1, 2: -1, 3: 2, 4: 1, 5: 5, 12: 1, 13: 1, 14: 1 } },
+  }), [1, 5, 12, 13, 14]);
+});
+
+const noExtraDailyActions = {
+  bossTimes: 0, arenaEnable: false, claimBottle: false, payRecruit: false,
+  openBox: false, claimHangUp: false, claimEmail: false, blackMarketPurchase: false,
+  freeGachaEnable: false,
+};
+
+function dailyClaimFixture({ failClaim = false, failAction = false, noRewards = false } = {}) {
+  const role = {
+    dailyTask: { dailyPoint: 0, complete: { ...DAILY_TASK_TARGETS } },
+    statistics: {}, statisticsTime: {},
+  };
+  const commands = [];
+  const logs = [];
+  let claimed = 0;
+  const runner = new DailyTaskRunner({
+    gameTokens: [{ id: "A", name: "测试" }],
+    sendGetRoleInfo: async () => ({ role: structuredClone(role) }),
+    sendMessageWithPromise: async (_id, command, params) => {
+      commands.push({ command, params });
+      if (command === "task_claimdailypoint") {
+        if (failClaim) throw new Error("领取失败");
+        role.dailyTask.complete[params.taskId] = -1;
+        role.dailyTask.dailyPoint = ++claimed * 10;
+      }
+      if (noRewards && FINAL_REWARD_TASKS.some((task) => task.command === command)) {
+        throw new Error("服务器错误: 3500020 - 没有可领取的奖励");
+      }
+      if (failAction && command === "legion_signin") throw new Error("签到失败");
+      return {};
+    },
+  }, { commandDelay: 0, taskDelay: 0 });
+  return { runner, role, commands, logs, callbacks: { onLog: (log) => logs.push(log) } };
+}
+
+test("完成未领取的日常不重做动作，补领实际任务并在最后核验100活跃", async () => {
+  const { runner, commands, callbacks, logs } = dailyClaimFixture();
+  const result = await runner.run("A", callbacks, noExtraDailyActions);
+  assert.equal(result.dailyPoint, 100);
+  assert.deepEqual(commands.filter((entry) => entry.command === "task_claimdailypoint")
+    .map((entry) => entry.params.taskId), [1, 2, 3, 4, 5, 6, 7, 12, 13, 14]);
+  assert.equal(commands.some(({ command }) => ["store_buy", "store_purchase", "system_mysharecallback", "hero_recruit"].includes(command)), false);
+  assert.equal(commands.at(-1).command, "task_claimdailyreward");
+  assert.match(logs.at(-1).message, /领取已核验/);
+});
+
+test("领取失败或活跃仍不足100时必须报未完成，不能显示所有任务成功", async () => {
+  const { runner, callbacks, logs, commands } = dailyClaimFixture({ failClaim: true });
+  await assert.rejects(runner.run("A", callbacks, noExtraDailyActions), (error) => {
+    assert.equal(error.retryable, false);
+    assert.match(error.message, /日常未全部完成.*活跃0\/100.*待领取任务/);
+    return true;
+  });
+  assert.equal(commands.filter(({ command }) => command === "task_claimdailypoint").length, 20);
+  assert.equal(logs.some((log) => log.type === "success" && /所有任务/.test(log.message)), false);
+});
+
+test("没有待领取奖励是可接受状态，但仍必须通过100活跃核验", async () => {
+  const { runner, callbacks } = dailyClaimFixture({ noRewards: true });
+  const result = await runner.run("A", callbacks, noExtraDailyActions);
+  assert.equal(result.dailyPoint, 100);
+});
+
+test("领取响应丢失后按服务器状态复查，不重复领取已成功的任务", async () => {
+  const { runner, role } = dailyClaimFixture();
+  const ids = [];
+  runner.tokenStore.sendMessageWithPromise = async (_id, _command, { taskId }) => {
+    ids.push(taskId);
+    role.dailyTask.complete[taskId] = -1;
+    throw new Error("响应超时");
+  };
+  await runner.claimDailyPoints("A");
+  assert.equal(ids.length, 10);
+  assert.deepEqual(getClaimableDailyTaskIds(role), []);
+});
+
+test("断线先重连，再发送命令；停止后不能继续发送", async () => {
+  const { runner } = dailyClaimFixture();
+  const events = [];
+  let connected = false;
+  runner.tokenStore.getWebSocketStatus = () => connected ? "connected" : "disconnected";
+  runner.tokenStore.sendMessageWithPromise = async () => { events.push("send"); return {}; };
+  runner.callbacks = { ensureConnection: async () => { events.push("reconnect"); connected = true; } };
+  await runner.executeGameCommand("A", "test");
+  assert.deepEqual(events, ["reconnect", "send"]);
+  runner.callbacks.shouldStop = () => true;
+  await assert.rejects(runner.executeGameCommand("A", "test"), /任务已停止/);
+  assert.deepEqual(events, ["reconnect", "send"]);
+});
+
+test("两次日常同时触发，后一个轮到执行才查活跃，前次已完成则跳过", async () => {
+  const queue = createAccountTaskQueue();
+  const { runner, callbacks, commands } = dailyClaimFixture();
+  const secondRunner = new DailyTaskRunner(runner.tokenStore, { commandDelay: 0, taskDelay: 0 });
+  const [first, second] = await Promise.all([
+    queue.run("A", () => runner.run("A", callbacks, noExtraDailyActions)),
+    queue.run("A", () => secondRunner.run("A", {}, noExtraDailyActions)),
+  ]);
+  assert.equal(first.skipped, false);
+  assert.deepEqual(second, { skipped: true, dailyPoint: 100 });
+  assert.equal(commands.filter(({ command }) => command === "task_claimdailyreward").length, 1);
 });

@@ -23,22 +23,29 @@ export const connectionQueue = { active: 0 };
  * @param {function} options.addLog - 日志添加函数
  * @returns {object} - 连接管理器对象
  */
-export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
+export function createConnectionManager({ tokenStore, batchSettings, addLog, shouldStop = () => false }) {
+  // 每个账号任务使用独立管理器，避免重复释放别的任务的槽位。
+  let ownsSlot = false;
   /**
    * 等待连接槽位
    */
   const waitForConnectionSlot = async () => {
+    if (ownsSlot) return;
     while (connectionQueue.active >= batchSettings.maxActive) {
+      if (shouldStop()) throw new Error("任务已停止");
       await new Promise((r) => setTimeout(r, 1000));
     }
+    if (shouldStop()) throw new Error("任务已停止");
     connectionQueue.active++;
+    ownsSlot = true;
   };
 
   /**
    * 释放连接槽位
    */
   const releaseConnectionSlot = () => {
-    if (connectionQueue.active > 0) {
+    if (ownsSlot) {
+      ownsSlot = false;
       connectionQueue.active--;
     }
   };
@@ -51,6 +58,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
   const waitForConnection = async (tokenId, timeout = batchSettings.connectionTimeout) => {
     const start = Date.now();
     while (Date.now() - start < timeout) {
+      if (shouldStop()) throw new Error("任务已停止");
       const status = tokenStore.getWebSocketStatus(tokenId);
       if (status === "connected") return true;
       await new Promise((r) => setTimeout(r, 500));
@@ -70,13 +78,11 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
       throw new Error(`Token not found: ${tokenId}`);
     }
 
+    await waitForConnectionSlot();
     let status = tokenStore.getWebSocketStatus(tokenId);
     let connected = status === "connected";
 
     if (!connected) {
-      // 等待连接槽位，限制并发连接数
-      await waitForConnectionSlot();
-
       addLog({
         time: new Date().toLocaleTimeString(),
         message: `正在连接... (队列: ${connectionQueue.active}/${batchSettings.maxActive})`,
@@ -99,6 +105,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
 
         tokenStore.closeWebSocketConnection(tokenId);
         await new Promise((r) => setTimeout(r, batchSettings.reconnectDelay));
+        if (shouldStop()) throw new Error("任务已停止");
 
         addLog({
           time: new Date().toLocaleTimeString(),
@@ -127,6 +134,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
 
     // Initialize Game Data (Critical for Battle Version and Session)
     try {
+      if (shouldStop()) throw new Error("任务已停止");
       // Fetch Role Info first (Standard flow)
       await tokenStore.sendMessageWithPromise(
         tokenId,
@@ -136,6 +144,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
       );
 
       // Fetch Battle Version
+      if (shouldStop()) throw new Error("任务已停止");
       const res = await tokenStore.sendMessageWithPromise(
         tokenId,
         "fight_startlevel",
@@ -151,6 +160,7 @@ export function createConnectionManager({ tokenStore, batchSettings, addLog }) {
         message: `初始化数据失败: ${e.message}`,
         type: "warning",
       });
+      if (shouldStop() || tokenStore.getWebSocketStatus(tokenId) !== "connected") throw e;
     }
 
     return true;
