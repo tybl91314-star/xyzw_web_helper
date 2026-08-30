@@ -2,6 +2,7 @@
  * 挂机、答题、签到类任务
  * 包含: claimHangUpRewards, batchAddHangUpTime, batchStudy, batchclubsign
  */
+import { sendCommandWithCompletion } from "../commandCompletion.js";
 
 /**
  * 创建挂机、答题、签到类任务执行器
@@ -200,7 +201,8 @@ export function createTasksHangUp(deps) {
     });
 
     // Preload questions
-    const { preloadQuestions } = await import("@/utils/studyQuestionsFromJSON.js");
+    const preloadQuestions = deps.preloadQuestions ||
+      (await import("@/utils/studyQuestionsFromJSON.js")).preloadQuestions;
     addLog({
       time: new Date().toLocaleTimeString(),
       message: `正在加载题库...`,
@@ -234,12 +236,23 @@ export function createTasksHangUp(deps) {
         };
 
         // Send start command
-        await tokenStore.sendMessageWithPromise(
+        const startResult = await sendCommandWithCompletion(
+          tokenStore,
           tokenId,
           "study_startgame",
           {},
           5000,
         );
+
+        if (startResult.completion) {
+          tokenStatus.value[tokenId] = "completed";
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} ${startResult.completion.message}`,
+            type: "success",
+          });
+          return; // 次数耗尽时没有新答题事件，不能继续等待90秒。
+        }
 
         // Wait for completion
         let maxWait = 90;
@@ -348,7 +361,8 @@ export function createTasksHangUp(deps) {
         });
         await ensureConnection(tokenId);
         if (shouldStop.value) return;
-        await tokenStore.sendMessageWithPromise(
+        const signResult = await sendCommandWithCompletion(
+          tokenStore,
           tokenId,
           "legion_signin",
           {},
@@ -358,7 +372,7 @@ export function createTasksHangUp(deps) {
         tokenStatus.value[tokenId] = "completed";
         addLog({
           time: new Date().toLocaleTimeString(),
-          message: `=== ${token.name} 俱乐部签到已完成 ===`,
+          message: `=== ${token.name} ${signResult.completion?.message || "俱乐部签到已完成"} ===`,
           type: "success",
         });
       } catch (error) {

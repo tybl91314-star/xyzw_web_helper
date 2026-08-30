@@ -1,4 +1,5 @@
 import { bonProtocol } from "./bonProtocol.js";
+import { classifyCommandCompletion } from "./commandCompletion.js";
 
 // 辅助函数
 const pickArenaTargetId = (targets) => {
@@ -60,8 +61,6 @@ export const getClaimableDailyTaskIds = (role) =>
     .filter(([type, target]) => Number(role?.dailyTask?.complete?.[type]) >= target)
     .map(([type]) => DAILY_TASK_REWARD_IDS[type])
     .sort((left, right) => left - right);
-
-const isNoRewardError = (error) => /3500020|没有可领取的奖励/.test(error?.message || "");
 
 export const getDailyActivityPoint = (roleData) => {
   const dailyPoint = Number(roleData?.dailyTask?.dailyPoint ?? 0);
@@ -267,19 +266,30 @@ export class DailyTaskRunner {
     description = "",
     timeout = 8000,
   ) {
+    let awaitingCommand = false;
     try {
       await this.prepareConnection(tokenId);
       if (description) this.log(`执行: ${description}`);
+      awaitingCommand = true;
       const result = await this.tokenStore.sendMessageWithPromise(
         tokenId,
         cmd,
         params,
         timeout,
       );
+      awaitingCommand = false;
       await new Promise((resolve) => setTimeout(resolve, this.delaySettings.commandDelay));
       if (description) this.log(`${description} - 成功`, "success");
       return result;
     } catch (error) {
+      const completion = !awaitingCommand || this.callbacks?.shouldStop?.()
+        ? null : classifyCommandCompletion(cmd, error);
+      if (completion) {
+        const tokenName = this.tokenStore.gameTokens.find((t) => t.id === tokenId)?.name || tokenId;
+        this.log(`[${tokenName}] ${description || cmd} - ${completion.message}`,
+          completion.kind === "nothing_to_claim" ? "info" : "success");
+        return { completion };
+      }
       if (description) {
         const token = this.tokenStore.gameTokens.find((t) => t.id === tokenId);
         const tokenName = token?.name || tokenId;
@@ -1046,7 +1056,6 @@ export class DailyTaskRunner {
     taskList.push(
       ...FINAL_REWARD_TASKS.map((task) => ({
         name: task.name,
-        reward: true,
         execute: () =>
           this.executeGameCommand(
             tokenId,
@@ -1071,10 +1080,6 @@ export class DailyTaskRunner {
         await new Promise((resolve) => setTimeout(resolve, this.delaySettings.taskDelay));
       } catch (error) {
         if (this.callbacks?.shouldStop?.()) throw error;
-        if (task.reward && isNoRewardError(error)) {
-          this.log(`${task.name}：没有待领取奖励`, "info");
-          continue;
-        }
         if (this.tokenStore.getWebSocketStatus &&
             this.tokenStore.getWebSocketStatus(tokenId) !== "connected") throw error;
         failures.push(task.name);

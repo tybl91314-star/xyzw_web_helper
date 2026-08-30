@@ -5,6 +5,7 @@
  */
 
 import { DailyTaskRunner } from "../dailyTaskRunner.js";
+import { sendCommandWithCompletion } from "../commandCompletion.js";
 
 /**
  * 从 activity_get 返回值中提取当前单周限时商店的免费商品。
@@ -298,7 +299,8 @@ export function createTasksStore(deps) {
           message: `${token.name} 发送珍宝阁免费领取请求...`,
           type: "info",
         });
-        const result = await tokenStore.sendMessageWithPromise(
+        const result = await sendCommandWithCompletion(
+          tokenStore,
           tokenId,
           "collection_claimfreereward",
           {},
@@ -307,7 +309,14 @@ export function createTasksStore(deps) {
 
         await new Promise((r) => setTimeout(r, delayConfig.action));
 
-        if (result.error) {
+        if (result.completion) {
+          addLog({
+            time: new Date().toLocaleTimeString(),
+            message: `${token.name} ${result.completion.message}`,
+            type: "success",
+          });
+          tokenStatus.value[tokenId] = "completed";
+        } else if (result.error) {
           addLog({
             time: new Date().toLocaleTimeString(),
             message: `${token.name} 珍宝阁领取失败: ${result.error}`,

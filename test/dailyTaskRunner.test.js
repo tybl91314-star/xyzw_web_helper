@@ -666,3 +666,54 @@ test("黑市领取首次失败时仅补领ID9，不重复领取竞技场及盐�
   assert.equal(role.dailyTask.dailyPoint, 110);
   assert.deepEqual(getClaimableDailyTaskIds(role), []);
 });
+
+test("日常重跑遇到已签到、已领取和无可领通行证时不计错误，最终仍核验活跃", async () => {
+  const { runner, callbacks, logs } = dailyClaimFixture();
+  const originalSend = runner.tokenStore.sendMessageWithPromise;
+  const expectedNoOps = {
+    system_signinreward: 400190,
+    legion_signin: 2300190,
+    discount_claimreward: 1000020,
+    card_claimreward: 1000020,
+    collection_claimfreereward: 12000116,
+    activity_recyclewarorderrewardclaim: 3500020,
+    dungeon_selecthero: 2600040,
+  };
+  runner.tokenStore.sendMessageWithPromise = async (tokenId, command, params) => {
+    if (expectedNoOps[command]) throw new Error(`服务器错误: ${expectedNoOps[command]} - 未知错误`);
+    return originalSend(tokenId, command, params);
+  };
+  const result = await runner.run("A", callbacks, noExtraDailyActions);
+  assert.equal(result.dailyPoint, 110);
+  assert.equal(logs.some((entry) => entry.type === "error"), false);
+  assert.ok(logs.some((entry) => entry.message.includes("没有可领取的通行证奖励")));
+  assert.match(logs.at(-1).message, /领取已核验/);
+});
+
+test("即使活跃110，未购卡、通用错误和未经核实的次数上限仍导致任务失败", async () => {
+  for (const [failedCommand, code] of [
+    ["card_claimreward", 1400010],
+    ["task_claimweekreward", 200020],
+    ["genie_buysweep", 3300050],
+  ]) {
+    const { runner, callbacks, role, logs } = dailyClaimFixture();
+    const originalSend = runner.tokenStore.sendMessageWithPromise;
+    runner.tokenStore.sendMessageWithPromise = async (tokenId, command, params) => {
+      if (command === failedCommand) throw new Error(`服务器错误: ${code} - 未知错误`);
+      return originalSend(tokenId, command, params);
+    };
+    await assert.rejects(runner.run("A", callbacks, noExtraDailyActions), /日常未全部完成.*活跃110/);
+    assert.equal(role.dailyTask.dailyPoint, 110);
+    assert.equal(logs.some((entry) => entry.type === "error"), true);
+    assert.equal(logs.some((entry) => /所有任务执行完成/.test(entry.message)), false);
+  }
+});
+
+test("积分接口报已领取也不能覆盖服务器仍待领取的最终核验结果", async () => {
+  const { runner, callbacks } = dailyClaimFixture();
+  runner.callbacks = callbacks;
+  runner.tokenStore.sendMessageWithPromise = async () => {
+    throw new Error("服务器错误: 700020 - 已经领取过这个任务");
+  };
+  await assert.rejects(runner.claimDailyPoints("A"), /仍有已完成未领取/);
+});
