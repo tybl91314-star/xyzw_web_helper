@@ -1,0 +1,12 @@
+[
+  { "id": 1, "completeCondition": 1, "completeValue": 1, "rewardPoints": 5 },
+  { "id": 2, "completeCondition": 2, "completeValue": 1, "rewardPoints": 5 },
+  { "id": 3, "completeCondition": 3, "completeValue": 3, "rewardPoints": 15 },
+  { "id": 4, "completeCondition": 4, "completeValue": 2, "rewardPoints": 15 },
+  { "id": 5, "completeCondition": 5, "completeValue": 5, "rewardPoints": 5 },
+  { "id": 6, "completeCondition": 6, "completeValue": 3, "rewardPoints": 15 },
+  { "id": 7, "completeCondition": 7, "completeValue": 3, "rewardPoints": 15 },
+  { "id": 8, "completeCondition": 13, "completeValue": 1, "rewardPoints": 5 },
+  { "id": 9, "completeCondition": 12, "completeValue": 1, "rewardPoints": 15 },
+  { "id": 10, "completeCondition": 14, "completeValue": 1, "rewardPoints": 15 }
+]

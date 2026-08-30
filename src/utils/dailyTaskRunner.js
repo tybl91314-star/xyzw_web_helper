@@ -45,14 +45,21 @@ const getTodayBossId = () => {
 
 export const DAILY_ACTIVITY_TARGET = 100;
 
-// complete 保存任务进度，-1 表示已领取。实际任务 ID 并非连续的 1～10。
+// complete 的键是进度类型（客户端 DailyTaskConf.completeCondition），
+// -1 表示已领取。领取接口则必须传 DailyTaskConf.id，两者不可混用。
 export const DAILY_TASK_TARGETS = Object.freeze({
   1: 1, 2: 1, 3: 3, 4: 2, 5: 5, 6: 3, 7: 3, 12: 1, 13: 1, 14: 1,
 });
+// 来源：游戏客户端 DailyTaskConf，竞技场13→8、黑市12→9、盐罐14→10。
+export const DAILY_TASK_REWARD_IDS = Object.freeze({
+  1: 1, 2: 2, 3: 3, 4: 4, 5: 5, 6: 6, 7: 7, 12: 9, 13: 8, 14: 10,
+});
+// 返回领取请求使用的 taskId；状态检查仍按 completeCondition 读取。
 export const getClaimableDailyTaskIds = (role) =>
   Object.entries(DAILY_TASK_TARGETS)
-    .filter(([id, target]) => Number(role?.dailyTask?.complete?.[id]) >= target)
-    .map(([id]) => Number(id));
+    .filter(([type, target]) => Number(role?.dailyTask?.complete?.[type]) >= target)
+    .map(([type]) => DAILY_TASK_REWARD_IDS[type])
+    .sort((left, right) => left - right);
 
 const isNoRewardError = (error) => /3500020|没有可领取的奖励/.test(error?.message || "");
 
@@ -64,7 +71,7 @@ export const getDailyActivityPoint = (roleData) => {
 export const isDailyActivityComplete = (roleData) =>
   getDailyActivityPoint(roleData) >= DAILY_ACTIVITY_TARGET;
 
-export const BLACK_MARKET_DAILY_TASK_ID = 12;
+export const BLACK_MARKET_DAILY_TASK_ID = 12; // 黑市进度类型；领取ID为9。
 export const BRONZE_CHEST_GOODS_ID = 1;
 export const PLATINUM_CHEST_GOODS_ID = 3;
 export const STORE_PURCHASE_UNLOCK_LEVEL = 4000;
